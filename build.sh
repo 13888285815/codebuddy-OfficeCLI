@@ -2,10 +2,40 @@
 set -e
 
 PROJECT="src/officecli/officecli.csproj"
-TARGETS="osx-arm64:officecli-mac-arm64 osx-x64:officecli-mac-x64 linux-x64:officecli-linux-x64 win-x64:officecli-win-x64.exe"
+ALL_TARGETS="osx-arm64:officecli-mac-arm64 osx-x64:officecli-mac-x64 linux-x64:officecli-linux-x64 linux-arm64:officecli-linux-arm64 win-x64:officecli-win-x64.exe"
+
+# Detect current platform RID
+detect_local_rid() {
+    local OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+    local ARCH=$(uname -m)
+    case "$OS" in
+        darwin)
+            case "$ARCH" in
+                arm64) echo "osx-arm64" ;;
+                x86_64) echo "osx-x64" ;;
+            esac ;;
+        linux)
+            case "$ARCH" in
+                x86_64) echo "linux-x64" ;;
+                aarch64|arm64) echo "linux-arm64" ;;
+            esac ;;
+    esac
+}
+
+# Find target entry by RID
+find_target() {
+    local RID="$1"
+    for target in $ALL_TARGETS; do
+        if [ "${target%%:*}" = "$RID" ]; then
+            echo "$target"
+            return
+        fi
+    done
+}
 
 build_config() {
     local CONFIG="$1"
+    local TARGETS="$2"
     local OUTPUT="bin/$(echo "$CONFIG" | tr '[:upper:]' '[:lower:]')"
 
     rm -rf "$OUTPUT"
@@ -40,21 +70,31 @@ CONFIG="${1:-release}"
 
 case "$CONFIG" in
     release|Release)
-        build_config "Release"
+        LOCAL_RID=$(detect_local_rid)
+        TARGET=$(find_target "$LOCAL_RID")
+        if [ -z "$TARGET" ]; then
+            echo "Unsupported platform: $(uname -s) $(uname -m)"
+            exit 1
+        fi
+        build_config "Release" "$TARGET"
         ;;
     debug|Debug)
-        build_config "Debug"
+        LOCAL_RID=$(detect_local_rid)
+        TARGET=$(find_target "$LOCAL_RID")
+        if [ -z "$TARGET" ]; then
+            echo "Unsupported platform: $(uname -s) $(uname -m)"
+            exit 1
+        fi
+        build_config "Debug" "$TARGET"
         ;;
     all)
-        build_config "Release"
-        echo ""
-        build_config "Debug"
+        build_config "Release" "$ALL_TARGETS"
         ;;
     *)
         echo "Usage: ./build.sh [release|debug|all]"
-        echo "  release  - Build Release only"
-        echo "  debug    - Build Debug only"
-        echo "  all      - Build both (default)"
+        echo "  release  - Build Release for current platform (default)"
+        echo "  debug    - Build Debug for current platform"
+        echo "  all      - Build Release for all platforms"
         exit 1
         ;;
 esac

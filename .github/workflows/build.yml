@@ -18,6 +18,8 @@ jobs:
             name: officecli-mac-x64
           - rid: linux-x64
             name: officecli-linux-x64
+          - rid: linux-arm64
+            name: officecli-linux-arm64
           - rid: win-x64
             name: officecli-win-x64.exe
 

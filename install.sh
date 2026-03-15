@@ -19,6 +19,7 @@ case "$OS" in
     linux)
         case "$ARCH" in
             x86_64) ASSET="officecli-linux-x64" ;;
+            aarch64|arm64) ASSET="officecli-linux-arm64" ;;
             *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
         esac
         ;;
