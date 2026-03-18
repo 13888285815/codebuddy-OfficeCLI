@@ -513,7 +513,7 @@ public class WordFunctionalTests : IDisposable
         // 4. Get + Verify updated
         tbl = _handler.Get("/body/tbl[1]");
         tbl.Format["border.top"].Should().Be("thick;12;0000FF");
-        tbl.Format["border.insideV"].Should().Be("nil");
+        tbl.Format["border.insideV"].Should().Be("none;4");
 
         // 5. Persistence
         Reopen();
@@ -574,7 +574,7 @@ public class WordFunctionalTests : IDisposable
         var tbl = _handler.Get("/body/tbl[1]");
         tbl.Format["border.top"].Should().Be("thick;12;000000");
         tbl.Format["border.bottom"].Should().Be("thick;12;000000");
-        tbl.Format["border.insideV"].Should().Be("nil");
+        tbl.Format["border.insideV"].Should().Be("none;4");
 
         // Set header row cells with bottom border (the middle line)
         _handler.Set("/body/tbl[1]/tr[1]/tc[1]", new() { ["text"] = "Col A", ["border.bottom"] = "single;6;000000" });
