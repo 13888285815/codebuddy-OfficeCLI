@@ -1592,4 +1592,31 @@ public class WordFunctionalTests : IDisposable
     {
         _handler.Get("/body/p[1]/r[1]").Format.Should().ContainKey(key);
     }
+
+    [Fact]
+    public void Get_ThemeColorOnly_ReturnsThemeName()
+    {
+        // Add a paragraph with a run
+        _handler.Add("/", "paragraph", null, new() { ["text"] = "Themed" });
+        _handler.Dispose();
+
+        // Directly set ThemeColor (without hex Val) via OpenXML
+        using (var doc = DocumentFormat.OpenXml.Packaging.WordprocessingDocument.Open(_path, true))
+        {
+            var run = doc.MainDocumentPart!.Document!.Body!
+                .Descendants<DocumentFormat.OpenXml.Wordprocessing.Run>().First();
+            var rPr = run.RunProperties ?? run.PrependChild(new DocumentFormat.OpenXml.Wordprocessing.RunProperties());
+            rPr.Color = new DocumentFormat.OpenXml.Wordprocessing.Color
+            {
+                ThemeColor = DocumentFormat.OpenXml.Wordprocessing.ThemeColorValues.Accent1
+            };
+            doc.MainDocumentPart.Document.Save();
+        }
+
+        // Reopen and verify Get returns theme name
+        _handler = new WordHandler(_path, editable: true);
+        var node = _handler.Get("/body/p[1]/r[1]");
+        node.Format.Should().ContainKey("color");
+        node.Format["color"].Should().Be("accent1");
+    }
 }

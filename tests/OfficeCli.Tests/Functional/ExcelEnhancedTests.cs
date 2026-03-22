@@ -407,4 +407,49 @@ public class ExcelEnhancedTests : IDisposable
         File.WriteAllBytes(path, png);
         return path;
     }
+
+    [Fact]
+    public void Get_FontThemeColor_ReturnsThemeName()
+    {
+        // Set a cell value and font color to ensure style infrastructure exists
+        _handler.Set("/Sheet1/A1", new() { ["value"] = "Themed", ["font.color"] = "FF0000" });
+        _handler.Dispose();
+
+        // Directly set theme color (index 4 = accent1) on font via OpenXML
+        using (var doc = DocumentFormat.OpenXml.Packaging.SpreadsheetDocument.Open(_path, true))
+        {
+            var wbPart = doc.WorkbookPart!;
+            var ssPart = wbPart.WorkbookStylesPart!;
+            var ss = ssPart.Stylesheet;
+
+            // Add a new font with theme color
+            var newFont = new DocumentFormat.OpenXml.Spreadsheet.Font();
+            newFont.Append(new DocumentFormat.OpenXml.Spreadsheet.FontSize { Val = 11 });
+            newFont.Append(new DocumentFormat.OpenXml.Spreadsheet.Color { Theme = 4 }); // accent1
+            newFont.Append(new DocumentFormat.OpenXml.Spreadsheet.FontName { Val = "Calibri" });
+            ss.Fonts!.Append(newFont);
+            var fontIdx = (uint)(ss.Fonts.Elements<DocumentFormat.OpenXml.Spreadsheet.Font>().Count() - 1);
+            ss.Fonts.Count = (uint)ss.Fonts.Elements<DocumentFormat.OpenXml.Spreadsheet.Font>().Count();
+
+            // Add a new cell format referencing this font
+            var newXf = new DocumentFormat.OpenXml.Spreadsheet.CellFormat { FontId = fontIdx, ApplyFont = true };
+            ss.CellFormats!.Append(newXf);
+            var xfIdx = (uint)(ss.CellFormats.Elements<DocumentFormat.OpenXml.Spreadsheet.CellFormat>().Count() - 1);
+            ss.CellFormats.Count = (uint)ss.CellFormats.Elements<DocumentFormat.OpenXml.Spreadsheet.CellFormat>().Count();
+
+            // Apply to cell A1
+            var sheet = wbPart.WorksheetParts.First();
+            var cell = sheet.Worksheet.Descendants<DocumentFormat.OpenXml.Spreadsheet.Cell>()
+                .First(c => c.CellReference?.Value == "A1");
+            cell.StyleIndex = xfIdx;
+
+            sheet.Worksheet.Save();
+            ssPart.Stylesheet.Save();
+        }
+
+        _handler = new ExcelHandler(_path, editable: true);
+        var node = _handler.Get("/Sheet1/A1");
+        node.Format.Should().ContainKey("font.color");
+        node.Format["font.color"].Should().Be("accent1");
+    }
 }
