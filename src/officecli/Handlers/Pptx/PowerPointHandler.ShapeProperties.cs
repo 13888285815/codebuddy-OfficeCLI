@@ -707,7 +707,12 @@ public partial class PowerPointHandler
 
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(shape, key, value))
-                        unsupported.Add(key);
+                    {
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid shape props: text, bold, italic, underline, color, fill, size, font, gradient, line, opacity, align, valign, x, y, width, height, rotation, name, link, animation)");
+                        else
+                            unsupported.Add(key);
+                    }
                     break;
             }
         }
@@ -1191,7 +1196,12 @@ public partial class PowerPointHandler
                 }
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(cell, key, value))
-                        unsupported.Add(key);
+                    {
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid cell props: text, bold, italic, underline, color, fill, size, font, align, valign, border, colspan, rowspan, margin)");
+                        else
+                            unsupported.Add(key);
+                    }
                     break;
             }
         }

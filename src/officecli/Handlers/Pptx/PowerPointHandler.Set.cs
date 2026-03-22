@@ -66,7 +66,10 @@ public partial class PowerPointHandler
                         }
                         break;
                     default:
-                        unsupported.Add(key);
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid presentation props: slideWidth, slideHeight, slideSize, width, height)");
+                        else
+                            unsupported.Add(key);
                         break;
                 }
             }
@@ -114,7 +117,10 @@ public partial class PowerPointHandler
                     }
                     else
                     {
-                        unsupported.Add(key);
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid master/layout props: name)");
+                        else
+                            unsupported.Add(key);
                     }
                 }
                 rootEl.Save();
@@ -466,7 +472,12 @@ public partial class PowerPointHandler
                     }
                     default:
                         if (!GenericXmlQuery.SetGenericAttribute(gf, key, value))
-                            unsupported.Add(key);
+                        {
+                            if (unsupported.Count == 0)
+                                unsupported.Add($"{key} (valid table props: x, y, width, height, name, style, firstrow, lastrow, bandedrows, bandedcols)");
+                            else
+                                unsupported.Add(key);
+                        }
                         break;
                 }
             }
@@ -619,7 +630,10 @@ public partial class PowerPointHandler
                         break;
                     }
                     default:
-                        unsupported.Add(key);
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid media props: volume, autoplay, trimstart, trimend, x, y, width, height)");
+                        else
+                            unsupported.Add(key);
                         break;
                 }
             }
@@ -742,7 +756,10 @@ public partial class PowerPointHandler
                         break;
                     }
                     default:
-                        unsupported.Add(key);
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid picture props: path, src, x, y, width, height, rotation, opacity, name, crop, cropleft, croptop, cropright, cropbottom)");
+                        else
+                            unsupported.Add(key);
                         break;
                 }
             }
@@ -804,7 +821,12 @@ public partial class PowerPointHandler
                         break; // consumed by align/distribute
                     default:
                         if (!GenericXmlQuery.SetGenericAttribute(slide2, key, value))
-                            unsupported.Add(key);
+                        {
+                            if (unsupported.Count == 0)
+                                unsupported.Add($"{key} (valid slide props: background, layout, transition, name, align, distribute, targets)");
+                            else
+                                unsupported.Add(key);
+                        }
                         break;
                 }
             }
@@ -969,7 +991,10 @@ public partial class PowerPointHandler
                         zmPr?.SetAttribute(new OpenXmlAttribute("", "imageType", null!, value));
                         break;
                     default:
-                        unsupported.Add(key);
+                        if (unsupported.Count == 0)
+                            unsupported.Add($"{key} (valid zoom props: target, image, src, path, imagetype, x, y, width, height)");
+                        else
+                            unsupported.Add(key);
                         break;
                 }
             }
@@ -1151,7 +1176,12 @@ public partial class PowerPointHandler
                     }
                     default:
                         if (!GenericXmlQuery.SetGenericAttribute(cxn, key, value))
-                            unsupported.Add(key);
+                        {
+                            if (unsupported.Count == 0)
+                                unsupported.Add($"{key} (valid connector props: line, color, fill, x, y, width, height, rotation, name, geometry)");
+                            else
+                                unsupported.Add(key);
+                        }
                         break;
                 }
             }
@@ -1217,7 +1247,12 @@ public partial class PowerPointHandler
                     }
                     default:
                         if (!GenericXmlQuery.SetGenericAttribute(grp, key, value))
-                            unsupported.Add(key);
+                        {
+                            if (unsupported.Count == 0)
+                                unsupported.Add($"{key} (valid group props: x, y, width, height, rotation, name, fill)");
+                            else
+                                unsupported.Add(key);
+                        }
                         break;
                 }
             }

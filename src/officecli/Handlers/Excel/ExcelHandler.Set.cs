@@ -751,7 +751,9 @@ public partial class ExcelHandler
                 }
                 default:
                     if (!GenericXmlQuery.SetGenericAttribute(cell, key, value))
-                        unsupported.Add(key);
+                        unsupported.Add(unsupported.Count == 0
+                            ? $"{key} (valid cell props: value, formula, font.bold, font.italic, font.color, font.size, font.name, fill, border.all, alignment.horizontal, numFmt, link)"
+                            : key);
                     break;
             }
         }
@@ -951,7 +953,9 @@ public partial class ExcelHandler
                 }
 
                 default:
-                    unsupported.Add(key);
+                    unsupported.Add(unsupported.Count == 0
+                        ? $"{key} (valid sheet props: freeze, name)"
+                        : key);
                     break;
             }
         }

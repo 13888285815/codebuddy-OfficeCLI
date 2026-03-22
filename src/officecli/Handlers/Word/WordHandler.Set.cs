@@ -933,7 +933,9 @@ public partial class WordHandler
                     }
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(EnsureRunProperties(run), key, value))
-                            unsupported.Add(key);
+                            unsupported.Add(unsupported.Count == 0
+                                ? $"{key} (valid run props: text, bold, italic, font, size, color, underline, strike, highlight, caps, smallcaps, superscript, subscript, shading, link, formula)"
+                                : key);
                         break;
                 }
             }
@@ -1010,7 +1012,9 @@ public partial class WordHandler
                         break;
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(pProps, key, value))
-                            unsupported.Add(key);
+                            unsupported.Add(unsupported.Count == 0
+                                ? $"{key} (valid paragraph props: text, style, alignment, bold, italic, font, size, color, spaceBefore, spaceAfter, lineSpacing, indent, liststyle, formula)"
+                                : key);
                         break;
                 }
             }
@@ -1130,19 +1134,16 @@ public partial class WordHandler
                             // gradient;startColor;endColor[;angle]  e.g. gradient;FF0000;0000FF;90
                             var startColor = SanitizeHex(shdParts[1]);
                             var endColor = SanitizeHex(shdParts[2]);
-                            // Warn if color positions look like numbers (likely swapped with angle)
+                            // Validate color positions don't look like numbers (likely swapped with angle)
                             if (int.TryParse(shdParts[1], out _) && shdParts[1].Length <= 3)
-                                Console.Error.WriteLine($"Warning: '{shdParts[1]}' looks like an angle, not a color. Format: gradient;STARTCOLOR;ENDCOLOR[;ANGLE]");
+                                throw new ArgumentException($"'{shdParts[1]}' looks like an angle, not a color. Format: gradient;STARTCOLOR;ENDCOLOR[;ANGLE]");
                             if (int.TryParse(shdParts[2], out _) && shdParts[2].Length <= 3)
-                                Console.Error.WriteLine($"Warning: '{shdParts[2]}' looks like an angle, not a color. Format: gradient;STARTCOLOR;ENDCOLOR[;ANGLE]");
+                                throw new ArgumentException($"'{shdParts[2]}' looks like an angle, not a color. Format: gradient;STARTCOLOR;ENDCOLOR[;ANGLE]");
                             int angleDeg = 180;
                             if (shdParts.Length >= 4)
                             {
                                 if (!int.TryParse(shdParts[3], out angleDeg))
-                                {
-                                    Console.Error.WriteLine($"Warning: invalid gradient angle '{shdParts[3]}', expected integer. Format: gradient;STARTCOLOR;ENDCOLOR[;ANGLE]");
-                                    angleDeg = 180;
-                                }
+                                    throw new ArgumentException($"Invalid gradient angle '{shdParts[3]}', expected integer. Format: gradient;STARTCOLOR;ENDCOLOR[;ANGLE]");
                             }
                             ApplyCellGradient(tcPr, startColor, endColor, angleDeg);
                         }
@@ -1301,7 +1302,9 @@ public partial class WordHandler
                         break;
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(tcPr, key, value))
-                            unsupported.Add(key);
+                            unsupported.Add(unsupported.Count == 0
+                                ? $"{key} (valid cell props: text, font, size, bold, italic, color, alignment, valign, width, shd, border, colspan)"
+                                : key);
                         break;
                 }
             }
@@ -1355,7 +1358,9 @@ public partial class WordHandler
                         break;
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(trPr, key, value))
-                            unsupported.Add(key);
+                            unsupported.Add(unsupported.Count == 0
+                                ? $"{key} (valid row props: height, height.exact, header)"
+                                : key);
                         break;
                 }
             }
@@ -1422,7 +1427,9 @@ public partial class WordHandler
                         break;
                     default:
                         if (!GenericXmlQuery.TryCreateTypedChild(tblPr, key, value))
-                            unsupported.Add(key);
+                            unsupported.Add(unsupported.Count == 0
+                                ? $"{key} (valid table props: width, alignment, style, indent, cellspacing, layout, padding, border*)"
+                                : key);
                         break;
                 }
             }
@@ -1545,20 +1552,14 @@ public partial class WordHandler
         if (parts.Length > 1)
         {
             if (!uint.TryParse(parts[1], out size))
-            {
-                Console.Error.WriteLine($"Warning: invalid border size '{parts[1]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
-                size = style == BorderValues.Thick ? 12u : 4u;
-            }
+                throw new ArgumentException($"Invalid border size '{parts[1]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
         }
         else
             size = style == BorderValues.Nil ? 0u : style == BorderValues.Thick ? 12u : 4u;
         string? color = parts.Length > 2 ? SanitizeHex(parts[2]) : null;
         uint space = 0u;
         if (parts.Length > 3 && !uint.TryParse(parts[3], out space))
-        {
-            Console.Error.WriteLine($"Warning: invalid border space '{parts[3]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
-            space = 0u;
-        }
+            throw new ArgumentException($"Invalid border space '{parts[3]}', expected integer. Format: STYLE[;SIZE[;COLOR[;SPACE]]]");
         return (style, size, color, space);
     }
 

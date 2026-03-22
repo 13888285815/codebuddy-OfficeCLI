@@ -1814,8 +1814,9 @@ public partial class WordHandler
                 // Generic fallback: create typed element via SDK schema validation
                 var created = GenericXmlQuery.TryCreateTypedElement(parent, type, properties, index);
                 if (created == null)
-                    throw new ArgumentException($"Schema-invalid element type '{type}' for parent '{parentPath}'. " +
-                        "Use raw-set --action append with explicit XML instead.");
+                    throw new ArgumentException($"Unknown element type '{type}' for {parentPath}. " +
+                        "Valid types: paragraph (p), run (r), table (tbl), row, cell, picture, chart, equation, comment, section, footnote, endnote, toc, style, watermark, bookmark, hyperlink, field, break, sdt, header, footer. " +
+                        "Use 'officecli docx add' for details.");
 
                 newElement = created;
                 var siblings = parent.ChildElements.Where(e => e.LocalName == created.LocalName).ToList();

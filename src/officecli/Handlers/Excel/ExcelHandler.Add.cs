@@ -1226,8 +1226,10 @@ public partial class ExcelHandler
 
                 var created = GenericXmlQuery.TryCreateTypedElement(fbParent!, type, properties, index);
                 if (created == null)
-                    throw new ArgumentException($"Schema-invalid element type '{type}' for parent '{parentPath}'. " +
-                        "Use raw-set --action append with explicit XML instead.");
+                    throw new ArgumentException(
+                        $"Unknown element type '{type}' for {parentPath}. " +
+                        "Valid types: sheet, row, cell, shape, chart, autofilter, databar, colorscale, iconset, formulacf, comment, namedrange, table, picture, validation, pivottable. " +
+                        "Use 'officecli xlsx add' for details.");
 
                 SaveWorksheet(fbWorksheet);
 
