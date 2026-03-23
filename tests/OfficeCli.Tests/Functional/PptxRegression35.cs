@@ -390,11 +390,10 @@ public class PptxRegression35 : IDisposable
         // Shape should exist
         var node = handler.Get("/slide[1]/shape[1]");
         node.Text.Should().Be("Custom shape");
-        // Preset should NOT be present because geometry overrides it
-        // But the Add code applies preset first (line 334), then effectKeys
-        // delegation processes geometry which removes preset and adds custom
-        node.Format.Should().NotContainKey("preset",
-            "Custom geometry should override preset, but preset is applied first in Add");
+        // Custom geometry should report preset="custom" to indicate non-preset geometry
+        node.Format.Should().ContainKey("preset");
+        node.Format["preset"]?.ToString().Should().Be("custom",
+            "Custom geometry should report preset='custom'");
     }
 
     // =====================================================================

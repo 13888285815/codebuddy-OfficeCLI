@@ -602,9 +602,10 @@ public class PptxRegression37 : IDisposable
         node.Should().NotBeNull();
         node.Text.Should().Be("Custom");
         // After inline preset="rect" + geometry override:
-        // final shape should have custom geometry (no "preset" key)
-        node.Format.Should().NotContainKey("preset",
-            "Custom geometry should override the inline-applied rect preset");
+        // final shape should have custom geometry with preset="custom"
+        node.Format.Should().ContainKey("preset");
+        node.Format["preset"]?.ToString().Should().Be("custom",
+            "Custom geometry should report preset='custom'");
     }
 
     // =====================================================================
