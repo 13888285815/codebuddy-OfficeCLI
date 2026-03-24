@@ -161,7 +161,12 @@ public class WatchFunctionalTests : IDisposable
     public void WatchNotifier_SilentlyIgnoresWhenNoWatch()
     {
         // Should not throw when no watch process is running
-        var act = () => WatchNotifier.NotifyIfWatching(_path, "/slide[1]");
+        var act = () => WatchNotifier.NotifyIfWatching(_path, new WatchMessage
+        {
+            Action = "replace",
+            Slide = 1,
+            Html = "<div>test</div>"
+        });
         act.Should().NotThrow();
     }
 
@@ -197,16 +202,24 @@ public class WatchFunctionalTests : IDisposable
         // Give the listener time to start
         await Task.Delay(200, cts.Token);
 
-        // Send notification
-        WatchNotifier.NotifyIfWatching(_path, "/slide[1]/shape[2]");
+        // Send notification with HTML content
+        WatchNotifier.NotifyIfWatching(_path, new WatchMessage
+        {
+            Action = "replace",
+            Slide = 1,
+            Html = "<div>slide1</div>",
+            FullHtml = "<html><body>full</body></html>"
+        });
 
         await listenerTask;
 
-        receivedMessage.Should().Be("refresh:/slide[1]/shape[2]");
+        receivedMessage.Should().NotBeNull();
+        receivedMessage.Should().Contain("\"Action\":\"replace\"");
+        receivedMessage.Should().Contain("\"Slide\":1");
     }
 
     [Fact]
-    public async Task WatchServer_ReceivesRefreshWithoutPath()
+    public async Task WatchServer_ReceivesFullRefresh()
     {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var pipeName = WatchServer.GetWatchPipeName(_path);
@@ -234,19 +247,21 @@ public class WatchFunctionalTests : IDisposable
         }, cts.Token);
 
         await Task.Delay(200, cts.Token);
-        WatchNotifier.NotifyIfWatching(_path);
+        WatchNotifier.NotifyIfWatching(_path, new WatchMessage
+        {
+            Action = "full",
+            FullHtml = "<html><body>full refresh</body></html>"
+        });
         await listenerTask;
 
-        receivedMessage.Should().Be("refresh");
+        receivedMessage.Should().Contain("\"Action\":\"full\"");
     }
 
     // ==================== HTTP server ====================
 
     [Fact]
-    public async Task WatchServer_ServesHtmlOnHttp()
+    public async Task WatchServer_ServesWaitingPageWhenNoContent()
     {
-        _handler.Add("/", "slide", null, new());
-        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "HttpTest", ["x"] = "1cm", ["y"] = "1cm", ["width"] = "10cm", ["height"] = "3cm" });
         _handler.Dispose();
 
         var port = GetFreePort();
@@ -258,7 +273,7 @@ public class WatchFunctionalTests : IDisposable
         // Wait for server to start
         await Task.Delay(500, cts.Token);
 
-        // Fetch HTML
+        // Fetch HTML — should get waiting page since no content pushed yet
         using var client = new TcpClient("localhost", port);
         var stream = client.GetStream();
         var request = Encoding.UTF8.GetBytes("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
@@ -270,13 +285,55 @@ public class WatchFunctionalTests : IDisposable
 
         response.Should().Contain("HTTP/1.1 200 OK");
         response.Should().Contain("text/html");
-        response.Should().Contain("HttpTest");
+        response.Should().Contain("Waiting for first update");
         response.Should().Contain("EventSource"); // SSE script injected
 
         cts.Cancel();
         try { await serverTask; } catch (OperationCanceledException) { }
 
         // Re-open handler for Dispose
+        _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    [Fact]
+    public async Task WatchServer_ServesPushedHtmlAfterNotification()
+    {
+        _handler.Add("/", "slide", null, new());
+        _handler.Add("/slide[1]", "shape", null, new() { ["text"] = "HttpTest", ["x"] = "1cm", ["y"] = "1cm", ["width"] = "10cm", ["height"] = "3cm" });
+        var fullHtml = _handler.ViewAsHtml();
+        _handler.Dispose();
+
+        var port = GetFreePort();
+        using var watch = new WatchServer(_path, port);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+        var serverTask = watch.RunAsync(cts.Token);
+        await Task.Delay(500, cts.Token);
+
+        // Push HTML via notification
+        WatchNotifier.NotifyIfWatching(_path, new WatchMessage
+        {
+            Action = "full",
+            FullHtml = fullHtml
+        });
+        await Task.Delay(200, cts.Token);
+
+        // Now fetch — should have the pushed content
+        using var client = new TcpClient("localhost", port);
+        var stream = client.GetStream();
+        var request = Encoding.UTF8.GetBytes("GET / HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        await stream.WriteAsync(request, cts.Token);
+
+        var buffer = new byte[65536];
+        var read = await stream.ReadAsync(buffer, cts.Token);
+        var response = Encoding.UTF8.GetString(buffer, 0, read);
+
+        response.Should().Contain("HttpTest");
+        response.Should().Contain("EventSource");
+
+        cts.Cancel();
+        try { await serverTask; } catch (OperationCanceledException) { }
+
         _handler = new PowerPointHandler(_path, editable: true);
     }
 
@@ -329,8 +386,9 @@ public class WatchFunctionalTests : IDisposable
 
         await listenerTask;
 
-        // Assert: watch received a "refresh" notification
-        receivedMessage.Should().StartWith("refresh");
+        // Assert: watch received a JSON notification (not just "refresh")
+        receivedMessage.Should().NotBeNull();
+        receivedMessage.Should().Contain("\"Action\"");
     }
 
     // ==================== Idle timeout ====================
@@ -384,5 +442,17 @@ public class WatchFunctionalTests : IDisposable
         try { await serverTask; } catch (OperationCanceledException) { }
 
         _handler = new PowerPointHandler(_path, editable: true);
+    }
+
+    // ==================== WatchMessage.ExtractSlideNum ====================
+
+    [Fact]
+    public void ExtractSlideNum_ParsesCorrectly()
+    {
+        WatchMessage.ExtractSlideNum("/slide[1]/shape[2]").Should().Be(1);
+        WatchMessage.ExtractSlideNum("/slide[3]").Should().Be(3);
+        WatchMessage.ExtractSlideNum("/").Should().Be(0);
+        WatchMessage.ExtractSlideNum(null).Should().Be(0);
+        WatchMessage.ExtractSlideNum("").Should().Be(0);
     }
 }
