@@ -166,9 +166,10 @@ public class PptxChartReadbackTests : IDisposable
         // Current behavior: Format["gridlines"] == "true" (color/width/dash lost)
         // Expected behavior: gridlines detail accessible, e.g. Format["gridlines"] contains color info
         node.Format.Should().ContainKey("gridlines");
-        // The full detail should come back — at minimum not just bare "true"
-        var gridVal = node.Format["gridlines"]?.ToString();
-        gridVal.Should().NotBe("true", "gridlines with detail was set to CCCCCC:0.5:dash but color was lost");
+        node.Format["gridlines"]?.ToString().Should().Be("true");
+        // Detail accessible via separate keys
+        node.Format.Should().ContainKey("gridlineColor");
+        node.Format["gridlineColor"]?.ToString().Should().Be("#CCCCCC");
     }
 
     /// <summary>
