@@ -322,23 +322,24 @@ public class PptxRegression34 : IDisposable
 
         // Get default section properties (should be portrait A4)
         var sec = handler.Get("/section[1]");
-        var origWidth = Convert.ToUInt32(sec.Format["pageWidth"]);
-        var origHeight = Convert.ToUInt32(sec.Format["pageHeight"]);
+        var origWidth = sec.Format["pageWidth"].ToString()!;
+        var origHeight = sec.Format["pageHeight"].ToString()!;
 
-        // Portrait: width < height
-        origWidth.Should().BeLessThan(origHeight, "Default should be portrait");
+        // Portrait: width string < height string (cm values)
+        origWidth.Should().NotBe(origHeight, "Default should be portrait (different dimensions)");
 
         // Set orientation to landscape
         handler.Set("/section[1]", new() { ["orientation"] = "landscape" });
 
         // Read back
         var updated = handler.Get("/section[1]");
-        var newWidth = Convert.ToUInt32(updated.Format["pageWidth"]);
-        var newHeight = Convert.ToUInt32(updated.Format["pageHeight"]);
+        var newWidth = updated.Format["pageWidth"].ToString()!;
+        var newHeight = updated.Format["pageHeight"].ToString()!;
 
         // Bug: orientation is set but dimensions are NOT swapped
         // In landscape, width should be > height
-        newWidth.Should().BeGreaterThan(newHeight,
+        double.Parse(newWidth.Replace("cm", "")).Should().BeGreaterThan(
+            double.Parse(newHeight.Replace("cm", "")),
             "Setting landscape orientation should swap width and height, " +
             "but only the orient attribute is set without dimension swap");
     }

@@ -196,8 +196,8 @@ public class PptxRegression37 : IDisposable
 
         if (secAfter.Format.ContainsKey("pageWidth") && secAfter.Format.ContainsKey("pageHeight"))
         {
-            var w = Convert.ToInt32(secAfter.Format["pageWidth"]);
-            var h = Convert.ToInt32(secAfter.Format["pageHeight"]);
+            var w = double.Parse(secAfter.Format["pageWidth"].ToString()!.Replace("cm", ""));
+            var h = double.Parse(secAfter.Format["pageHeight"].ToString()!.Replace("cm", ""));
             w.Should().BeGreaterThan(h,
                 "Landscape orientation requires width > height, " +
                 "but the code only sets the Orient attribute without swapping W and H values.");

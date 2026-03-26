@@ -622,13 +622,10 @@ public class PptxRegression44 : IDisposable
 
         var node = handler.Get("/section[1]");
         node.Format.Should().ContainKey("pageWidth");
-        // The value is stored as uint, so comparing to string "12240" would fail
         var pwValue = node.Format["pageWidth"];
-        pwValue.ToString().Should().Be("12240",
-            because: "pageWidth should round-trip correctly");
-        // BUG: The value is uint (12240u), not string ("12240").
-        // This means node.Format["pageWidth"].Should().Be("12240") would fail
-        // because uint 12240 != string "12240".
+        // pageWidth now returns cm-formatted string
+        pwValue.ToString()!.Should().EndWith("cm",
+            because: "pageWidth should return a unit-qualified cm string");
         pwValue.Should().BeOfType<string>(
             because: "format values should be strings for consistency with other properties");
     }

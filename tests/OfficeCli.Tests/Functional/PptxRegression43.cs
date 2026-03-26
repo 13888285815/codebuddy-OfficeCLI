@@ -417,8 +417,8 @@ public class PptxRegression43 : IDisposable
         // Page dimensions should be swapped: width > height
         if (node.Format.ContainsKey("pageWidth") && node.Format.ContainsKey("pageHeight"))
         {
-            var w = Convert.ToInt32(node.Format["pageWidth"]);
-            var h = Convert.ToInt32(node.Format["pageHeight"]);
+            var w = double.Parse(node.Format["pageWidth"].ToString()!.Replace("cm", ""));
+            var h = double.Parse(node.Format["pageHeight"].ToString()!.Replace("cm", ""));
             w.Should().BeGreaterThan(h,
                 because: "landscape orientation should have width > height");
         }

@@ -132,8 +132,8 @@ public class BugReproTests : IDisposable
         });
 
         var sec = _wordHandler.Get("/section[1]");
-        var w = Convert.ToUInt32(sec.Format["pageWidth"]);
-        var h = Convert.ToUInt32(sec.Format["pageHeight"]);
+        var w = double.Parse(sec.Format["pageWidth"].ToString()!.Replace("cm", ""));
+        var h = double.Parse(sec.Format["pageHeight"].ToString()!.Replace("cm", ""));
 
         // In landscape, width should be > height
         w.Should().BeGreaterThan(h, "Landscape page width should be greater than height");
