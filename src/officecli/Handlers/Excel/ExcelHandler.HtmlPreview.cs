@@ -113,6 +113,13 @@ public partial class ExcelHandler
             }
         }
 
+        // Empty sheet (SheetData exists but no rows/cells)
+        if (maxRow == 0 || maxCol == 0)
+        {
+            sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
+            return;
+        }
+
         // Limit rendering to reasonable size
         maxRow = Math.Min(maxRow, 5000);
         maxCol = Math.Min(maxCol, 200);
@@ -189,7 +196,7 @@ public partial class ExcelHandler
 
                     var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
                     var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c);
-                    var value = cell != null ? GetCellDisplayValue(cell) : "";
+                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
                     var spanAttrs = "";
                     if (mergeInfo.ColSpan > 1) spanAttrs += $" colspan=\"{mergeInfo.ColSpan}\"";
                     if (mergeInfo.RowSpan > 1) spanAttrs += $" rowspan=\"{mergeInfo.RowSpan}\"";
@@ -200,7 +207,7 @@ public partial class ExcelHandler
                 {
                     var cell = cellMap.TryGetValue((r, c), out var nc) ? nc : null;
                     var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c);
-                    var value = cell != null ? GetCellDisplayValue(cell) : "";
+                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
                     sb.Append($"<td{style}>{HtmlEncode(value)}</td>");
                 }
             }
@@ -260,7 +267,7 @@ public partial class ExcelHandler
         {
             if (col.Width?.Value == null) continue;
             // Excel column width is in character units; convert to approximate pixels (1 char ≈ 7.5px + 5px padding)
-            var widthPx = col.Width.Value * 7.5 + 5;
+            var widthPx = col.Width.Value == 0 ? 0 : col.Width.Value * 7.5 + 5;
             var min = (int)(col.Min?.Value ?? 1u);
             var max = (int)(col.Max?.Value ?? (uint)min);
             for (int c = min; c <= max; c++)
@@ -334,9 +341,9 @@ public partial class ExcelHandler
 
         var font = fonts.Elements<Font>().ElementAt((int)fontId);
 
-        if (font.Bold != null) styles.Add("font-weight:bold");
-        if (font.Italic != null) styles.Add("font-style:italic");
-        if (font.Strike != null) styles.Add("text-decoration:line-through");
+        if (font.Bold != null && font.Bold.Val?.Value != false) styles.Add("font-weight:bold");
+        if (font.Italic != null && font.Italic.Val?.Value != false) styles.Add("font-style:italic");
+        if (font.Strike != null && font.Strike.Val?.Value != false) styles.Add("text-decoration:line-through");
         if (font.Underline != null)
         {
             var existing = styles.FindIndex(s => s.StartsWith("text-decoration:"));
@@ -471,8 +478,8 @@ public partial class ExcelHandler
         if (alignment.TextRotation?.HasValue == true && alignment.TextRotation.Value != 0)
         {
             var rot = alignment.TextRotation.Value;
-            // Excel: 0-90 = counter-clockwise, 91-180 mapped to -1 to -90
-            int cssDeg = rot <= 90 ? -(int)rot : (int)rot - 90;
+            // Excel: 0-90 = counter-clockwise, 91-180 = clockwise (91=1°CW, 180=90°CW)
+            int cssDeg = rot <= 90 ? -(int)rot : 90 - (int)rot;
             styles.Add($"writing-mode:vertical-lr;transform:rotate({cssDeg}deg)");
         }
 
@@ -533,6 +540,149 @@ public partial class ExcelHandler
         if (raw.Length == 6)
             return "#" + raw;
         return "#" + raw;
+    }
+
+    // ==================== Formatted Cell Value ====================
+
+    /// <summary>
+    /// Get cell display value with number formatting applied for HTML preview.
+    /// Handles common formats: percentage, thousands separator, decimal places, dates.
+    /// </summary>
+    private string GetFormattedCellValue(Cell cell, Stylesheet? stylesheet)
+    {
+        var rawValue = GetCellDisplayValue(cell);
+        if (string.IsNullOrEmpty(rawValue)) return rawValue;
+
+        // Only format numeric values (not strings, shared strings, etc.)
+        if (cell.DataType?.Value == CellValues.SharedString ||
+            cell.DataType?.Value == CellValues.InlineString ||
+            cell.DataType?.Value == CellValues.String ||
+            cell.DataType?.Value == CellValues.Boolean ||
+            cell.DataType?.Value == CellValues.Error)
+            return rawValue;
+
+        if (!double.TryParse(rawValue, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var numVal))
+            return rawValue;
+
+        // Look up number format
+        var styleIndex = cell.StyleIndex?.Value ?? 0;
+        if (styleIndex == 0 || stylesheet == null) return rawValue;
+
+        var cellFormats = stylesheet.CellFormats;
+        if (cellFormats == null || styleIndex >= (uint)cellFormats.Elements<CellFormat>().Count())
+            return rawValue;
+
+        var xf = cellFormats.Elements<CellFormat>().ElementAt((int)styleIndex);
+        var numFmtId = xf.NumberFormatId?.Value ?? 0;
+        if (numFmtId == 0) return rawValue;
+
+        // Resolve format code
+        string? fmtCode = null;
+        var customFmt = stylesheet.NumberingFormats?.Elements<NumberingFormat>()
+            .FirstOrDefault(nf => nf.NumberFormatId?.Value == numFmtId);
+        if (customFmt?.FormatCode?.Value != null)
+            fmtCode = customFmt.FormatCode.Value;
+        else
+            fmtCode = ResolveBuiltInFormat(numFmtId);
+
+        if (fmtCode == null) return rawValue;
+
+        return ApplyNumberFormat(numVal, fmtCode);
+    }
+
+    private static string? ResolveBuiltInFormat(uint numFmtId) => numFmtId switch
+    {
+        1 => "0",
+        2 => "0.00",
+        3 => "#,##0",
+        4 => "#,##0.00",
+        9 => "0%",
+        10 => "0.00%",
+        11 => "0.00E+00",
+        14 => "m/d/yy",
+        15 => "d-mmm-yy",
+        16 => "d-mmm",
+        17 => "mmm-yy",
+        18 => "h:mm AM/PM",
+        19 => "h:mm:ss AM/PM",
+        20 => "h:mm",
+        21 => "h:mm:ss",
+        22 => "m/d/yy h:mm",
+        37 => "#,##0 ;(#,##0)",
+        38 => "#,##0 ;(#,##0)",
+        39 => "#,##0.00;(#,##0.00)",
+        40 => "#,##0.00;(#,##0.00)",
+        49 => "@",
+        _ => null
+    };
+
+    private static string ApplyNumberFormat(double value, string fmtCode)
+    {
+        var fmt = fmtCode.ToLowerInvariant();
+
+        // Percentage formats
+        if (fmt.Contains('%'))
+        {
+            var pctVal = value * 100;
+            var decimals = CountDecimalPlaces(fmtCode);
+            return pctVal.ToString($"F{decimals}") + "%";
+        }
+
+        // Date formats (serial number → DateTime)
+        if (fmt.Contains('y') || fmt.Contains('m') || fmt.Contains('d') || fmt.Contains('h'))
+        {
+            try
+            {
+                var dt = DateTime.FromOADate(value);
+                var dotnetFmt = fmtCode
+                    .Replace("yyyy", "yyyy").Replace("yy", "yy")
+                    .Replace("mmmm", "MMMM").Replace("mmm", "MMM").Replace("mm", "MM").Replace("m", "M")
+                    .Replace("dddd", "dddd").Replace("ddd", "ddd").Replace("dd", "dd").Replace("d", "d")
+                    .Replace("hh", "HH").Replace("h", "H")
+                    .Replace("ss", "ss").Replace("s", "s")
+                    .Replace("AM/PM", "tt").Replace("am/pm", "tt");
+                return dt.ToString(dotnetFmt, System.Globalization.CultureInfo.InvariantCulture);
+            }
+            catch { return value.ToString(); }
+        }
+
+        // Scientific notation
+        if (fmt.Contains("e+") || fmt.Contains("e-"))
+        {
+            var decimals = CountDecimalPlaces(fmtCode);
+            return value.ToString($"E{decimals}");
+        }
+
+        // Numeric with thousands separator and/or decimals
+        bool hasThousands = fmtCode.Contains(',') && fmtCode.Contains('#');
+        var numDecimals = CountDecimalPlaces(fmtCode);
+
+        if (hasThousands)
+            return value.ToString($"N{numDecimals}", System.Globalization.CultureInfo.InvariantCulture);
+        if (numDecimals > 0)
+            return value.ToString($"F{numDecimals}");
+
+        // @ = text format — return raw
+        if (fmt == "@") return value.ToString();
+
+        // Integer format "0"
+        if (fmtCode.Trim() == "0") return ((long)Math.Round(value)).ToString();
+
+        return value.ToString();
+    }
+
+    private static int CountDecimalPlaces(string fmtCode)
+    {
+        var dotIdx = fmtCode.IndexOf('.');
+        if (dotIdx < 0) return 0;
+        int count = 0;
+        for (int i = dotIdx + 1; i < fmtCode.Length; i++)
+        {
+            if (fmtCode[i] == '0' || fmtCode[i] == '#') count++;
+            else break;
+        }
+        return count;
     }
 
     // ==================== CSS ====================
@@ -661,6 +811,6 @@ public partial class ExcelHandler
     private static string CssSanitize(string value)
     {
         // Strip characters that could break CSS context
-        return Regex.Replace(value, @"[;:{}()\\""]", "");
+        return Regex.Replace(value, @"[;:{}()\\""']", "");
     }
 }
