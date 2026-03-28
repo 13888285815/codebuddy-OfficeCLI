@@ -767,11 +767,13 @@ public partial class WordHandler
         body {{ background: #f0f0f0; font-family: {font}; color: {dd.Color}; padding: 20px; }}
         .page {{ background: white; margin: 0 auto 40px; padding: {mT} {mR} {mB} {mL};
             box-shadow: 0 2px 8px rgba(0,0,0,0.15); border-radius: 4px;
-            min-height: {pageH}; line-height: {lh}; font-size: {sz}; position: relative; overflow-x: auto; }}
-        .doc-header, .doc-footer {{ color: #888; font-size: 9pt;
-            border-bottom: 1px solid #e0e0e0; margin-bottom: 1em; padding-bottom: 0.5em; }}
-        .doc-footer {{ border-bottom: none; border-top: 1px solid #e0e0e0;
-            margin-top: 1em; padding-top: 0.5em; margin-bottom: 0; }}
+            min-height: {pageH}; line-height: {lh}; font-size: {sz}; position: relative; overflow-x: auto;
+            display: flex; flex-direction: column; }}
+        .page-body {{ flex: 1; }}
+        .doc-header, .doc-footer {{ color: #888; font-size: 9pt; }}
+        .doc-header {{ border-bottom: 1px solid #e0e0e0; margin-bottom: 1em; padding-bottom: 0.5em; }}
+        .doc-footer {{ border-top: 1px solid #e0e0e0;
+            margin-top: auto; padding-top: 0.5em; }}
         h1, h2, h3, h4, h5, h6 {{ line-height: 1.4; }}
         p {{ margin: 0; }}
         p.empty {{ margin: 0; min-height: 1em; }}

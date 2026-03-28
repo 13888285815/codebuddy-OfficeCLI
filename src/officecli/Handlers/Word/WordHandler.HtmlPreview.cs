@@ -82,18 +82,24 @@ public partial class WordHandler
         var bodyContent = bodySb.ToString();
         var pages = bodyContent.Split("<!--PAGE_BREAK-->");
 
+        // Filter out truly empty trailing page (empty string after final page break)
+        var pageList = new List<string>();
         for (int i = 0; i < pages.Length; i++)
         {
-            var pageContent = pages[i].Trim();
-            // Skip empty pages: truly empty or only empty paragraphs/whitespace
-            var textOnly = Regex.Replace(pageContent, @"<[^>]*>", "").Replace("&nbsp;", "").Trim();
-            if (string.IsNullOrEmpty(textOnly))
-                continue;
+            var pc = pages[i].Trim();
+            if (string.IsNullOrEmpty(pc) && i == pages.Length - 1)
+                continue; // Skip completely empty trailing split
+            pageList.Add(pc);
+        }
 
+        for (int i = 0; i < pageList.Count; i++)
+        {
             sb.AppendLine($"<div class=\"page\" style=\"{maxW}\">");
             if (i == 0) sb.Append(headerHtml);
-            sb.Append(pageContent);
+            sb.Append("<div class=\"page-body\">");
+            sb.Append(pageList[i]);
             if (i == 0) sb.Append(footnotesHtml);
+            sb.Append("</div>");
             sb.Append(footerHtml);
             sb.AppendLine("</div>");
         }
