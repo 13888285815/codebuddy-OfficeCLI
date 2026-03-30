@@ -22,6 +22,7 @@ public static class SkillInstaller
         (["cursor"],                      "Cursor",         ".cursor",              Path.Combine(".cursor", "skills")),
         (["windsurf"],                    "Windsurf",       ".windsurf",            Path.Combine(".windsurf", "skills")),
         (["minimax", "minimax-cli"],      "MiniMax CLI",    ".minimax",             Path.Combine(".minimax", "skills")),
+        (["opencode"],                    "OpenCode",       ".opencode",            Path.Combine(".opencode", "skills")),
         (["openclaw"],                    "OpenClaw",       ".openclaw",            Path.Combine(".openclaw", "skills")),
         (["nanobot"],                     "NanoBot",        Path.Combine(".nanobot", "workspace"),   Path.Combine(".nanobot", "workspace", "skills")),
         (["zeroclaw"],                    "ZeroClaw",       Path.Combine(".zeroclaw", "workspace"),  Path.Combine(".zeroclaw", "workspace", "skills")),
@@ -191,7 +192,7 @@ public static class SkillInstaller
         }
 
         Console.Error.WriteLine($"Unknown target: {agentKey}");
-        Console.Error.WriteLine("Supported: claude, copilot, codex, cursor, windsurf, minimax, openclaw, nanobot, zeroclaw, all");
+        Console.Error.WriteLine("Supported: claude, copilot, codex, cursor, windsurf, minimax, opencode, openclaw, nanobot, zeroclaw, all");
         Console.Error.WriteLine($"Or a skill name: {string.Join(", ", SkillMap.Keys.OrderBy(k => k))}");
         return installed;
     }
