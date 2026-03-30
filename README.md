@@ -150,7 +150,7 @@ officecli add deck.pptx / --type slide --prop title="Q4 Report"
 
 **Word** — paragraphs, runs, tables, styles, headers/footers, images, equations, comments, lists, watermarks, bookmarks, TOC
 
-**Excel** — cells, formulas, sheets, styles, conditional formatting, charts, pivot tables, named ranges, data validation, `$Sheet:A1` cell addressing
+**Excel** — cells, formulas (150+ built-in functions with auto-evaluation), sheets, styles, conditional formatting, charts, pivot tables, named ranges, data validation, CSV/TSV import, `$Sheet:A1` cell addressing
 
 **PowerPoint** — slides, shapes, text boxes, images, tables, charts, animations, morph transitions, 3D models (.glb), slide zoom, equations, themes, connectors, video/audio
 
@@ -367,18 +367,27 @@ All commands support `--json`. The general response shapes:
 ]
 ```
 
-**Errors** return a non-zero exit code with a JSON error object on stdout when `--json` is used:
+**Errors** return a non-zero exit code with a structured error object including error code, suggestion, and valid values when available:
 
 ```json
-{"error": "Element not found: /body/p[99]"}
+{
+  "success": false,
+  "error": {
+    "error": "Slide 50 not found (total: 8)",
+    "code": "not_found",
+    "suggestion": "Valid Slide index range: 1-8"
+  }
+}
 ```
+
+Error codes: `not_found`, `invalid_value`, `unsupported_property`, `invalid_path`, `unsupported_type`, `missing_property`, `file_not_found`, `file_locked`, `invalid_selector`. Property names are auto-corrected -- misspelling a property returns a suggestion with the closest match.
 
 **Error Recovery** -- Agents self-correct by inspecting available elements:
 
 ```bash
 # Agent tries an invalid path
 officecli get report.docx /body/p[99] --json
-# Returns: {"error": "Element not found: /body/p[99]"}
+# Returns: {"success": false, "error": {"error": "...", "code": "not_found", "suggestion": "..."}}
 
 # Agent self-corrects by checking available elements
 officecli get report.docx /body --depth 1 --json
@@ -419,27 +428,28 @@ OFFICECLI_SKIP_UPDATE=1 officecli ...          # Skip check for one invocation (
 
 | Command | Description |
 |---------|-------------|
-| `create <file>` | Create a blank .docx, .xlsx, or .pptx (type from extension) |
-| `view <file> <mode>` | View content (modes: `outline`, `text`, `annotated`, `stats`, `issues`) |
-| `get <file> <path>` | Get element and children (`--depth N`, `--json`) |
-| `query <file> <selector>` | CSS-like query (`[attr=value]`, `:contains()`, `:has()`, etc.) |
-| `set <file> <path> --prop k=v` | Modify element properties |
-| `add <file> <parent> --type <t>` | Add element (or clone with `--from <path>`) |
-| `remove <file> <path>` | Remove an element |
-| `move <file> <path>` | Move element (`--to <parent> --index N`) |
-| `swap <file> <path1> <path2>` | Swap two elements |
-| `validate <file>` | Validate against OpenXML schema |
-| `batch <file>` | Multiple operations in one open/save cycle (JSON on stdin or `--input`) |
-| `watch <file>` | Live HTML preview in browser with auto-refresh |
-| `mcp-serve` | Start MCP server for AI tool integration |
-| `raw <file> <part>` | View raw XML of a document part |
-| `raw-set <file> <part>` | Modify raw XML via XPath |
-| `add-part <file> <parent>` | Add a new document part (header, chart, etc.) |
-| `open <file>` | Start resident mode (keep document in memory) |
-| `close <file>` | Save and close resident mode |
-| `install [target]` | Install binary + skills + MCP (`all`, `claude`, `cursor`, etc.) |
-| `config <key> [value]` | Get or set configuration |
-| `<format> <command> [element]` | Built-in help (e.g. `officecli pptx set shape`) |
+| [`create`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-create) | Create a blank .docx, .xlsx, or .pptx (type from extension) |
+| [`view`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-view) | View content (modes: `outline`, `text`, `annotated`, `stats`, `issues`, `html`) |
+| [`get`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-get) | Get element and children (`--depth N`, `--json`) |
+| [`query`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-query) | CSS-like query (`[attr=value]`, `:contains()`, `:has()`, etc.) |
+| [`set`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-set) | Modify element properties |
+| [`add`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-add) | Add element (or clone with `--from <path>`) |
+| [`remove`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-remove) | Remove an element |
+| [`move`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-move) | Move element (`--to <parent> --index N`) |
+| [`swap`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-swap) | Swap two elements |
+| [`validate`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-validate) | Validate against OpenXML schema |
+| [`batch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-batch) | Multiple operations in one open/save cycle (JSON on stdin or `--input`) |
+| [`merge`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-merge) | Template merge — replace `{{key}}` placeholders with JSON data |
+| [`watch`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-watch) | Live HTML preview in browser with auto-refresh |
+| [`mcp`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-mcp) | Start MCP server for AI tool integration |
+| [`raw`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-raw) | View raw XML of a document part |
+| [`raw-set`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-raw) | Modify raw XML via XPath |
+| `add-part` | Add a new document part (header, chart, etc.) |
+| [`open`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-open) | Start resident mode (keep document in memory) |
+| `close` | Save and close resident mode |
+| [`install`](https://github.com/iOfficeAI/OfficeCLI/wiki/command-install) | Install binary + skills + MCP (`all`, `claude`, `cursor`, etc.) |
+| `config` | Get or set configuration |
+| `<format> <command>` | [Built-in help](https://github.com/iOfficeAI/OfficeCLI/wiki/command-reference) (e.g. `officecli pptx set shape`) |
 
 ## End-to-End Workflow Example
 
@@ -467,6 +477,32 @@ officecli view report.pptx issues --json
 officecli set report.pptx /slide[1]/shape[1] --prop font=Arial
 ```
 
+### Template Merge
+
+Replace `{{key}}` placeholders in any document with JSON data -- works across paragraphs, table cells, shapes, headers, footers, and chart titles.
+
+```bash
+# Merge from inline JSON
+officecli merge template.docx output.docx '{"name":"Alice","dept":"Sales","date":"2026-03-30"}'
+
+# Merge from a JSON file
+officecli merge template.pptx report.pptx data.json
+
+# Excel template
+officecli merge budget-template.xlsx q4-budget.xlsx '{"quarter":"Q4","year":"2026"}'
+```
+
+### Units & Colors
+
+All dimension and color properties accept flexible input formats:
+
+| Type | Accepted formats | Examples |
+|------|-----------------|----------|
+| **Dimensions** | cm, in, pt, px, or raw EMU | `2cm`, `1in`, `72pt`, `96px`, `914400` |
+| **Colors** | Hex, named, RGB, theme | `#FF0000`, `FF0000`, `red`, `rgb(255,0,0)`, `accent1` |
+| **Font sizes** | Bare number or pt-suffixed | `14`, `14pt`, `10.5pt` |
+| **Spacing** | pt, cm, in, or multiplier | `12pt`, `0.5cm`, `1.5x`, `150%` |
+
 ## Common Patterns
 
 ```bash
@@ -480,9 +516,24 @@ officecli get deck.pptx / --depth 2 --json
 # Bulk-update Excel cells
 officecli batch budget.xlsx --input updates.json --json
 
+# Import CSV data into an Excel sheet
+officecli add budget.xlsx / --type sheet --prop name="Q1 Data" --prop csv=sales.csv
+
+# Template merge for batch reports
+officecli merge invoice-template.docx invoice-001.docx '{"client":"Acme","total":"$5,200"}'
+
 # Check document quality before delivery
 officecli validate report.docx && officecli view report.docx issues --json
 ```
+
+## Documentation
+
+The [Wiki](https://github.com/iOfficeAI/OfficeCLI/wiki) has detailed guides for every command, element type, and property:
+
+- **By format:** [Word](https://github.com/iOfficeAI/OfficeCLI/wiki/word-reference) | [Excel](https://github.com/iOfficeAI/OfficeCLI/wiki/excel-reference) | [PowerPoint](https://github.com/iOfficeAI/OfficeCLI/wiki/powerpoint-reference)
+- **Workflows:** [End-to-end examples](https://github.com/iOfficeAI/OfficeCLI/wiki/workflows) -- Word reports, Excel dashboards, PowerPoint decks, batch modifications, resident mode
+- **Troubleshooting:** [Common errors and solutions](https://github.com/iOfficeAI/OfficeCLI/wiki/troubleshooting)
+- **AI agent guide:** [Decision tree for navigating the wiki](https://github.com/iOfficeAI/OfficeCLI/wiki/agent-guide)
 
 ## Build from Source
 
