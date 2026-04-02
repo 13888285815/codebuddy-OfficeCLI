@@ -30,7 +30,9 @@ static partial class CommandBuilder
             var force = result.GetValue(forceOption);
 
             // Check document protection for .docx files
-            if (!force && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
+            // Skip protection check if the user is changing the protection mode itself
+            var isProtectionChange = props?.Any(p => p.StartsWith("protection=", StringComparison.OrdinalIgnoreCase)) == true;
+            if (!force && !isProtectionChange && file.Extension.Equals(".docx", StringComparison.OrdinalIgnoreCase))
             {
                 var protectionError = CheckDocxProtection(file.FullName, path, json);
                 if (protectionError != 0) return protectionError;
