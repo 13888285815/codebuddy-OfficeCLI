@@ -569,7 +569,16 @@ public partial class PowerPointHandler
                     bodyPr.RemoveAllChildren<Drawing.PresetTextWarp>();
                     if (!string.IsNullOrWhiteSpace(value) && !value.Equals("none", StringComparison.OrdinalIgnoreCase))
                     {
-                        var warpName = value.StartsWith("text") ? value : $"text{char.ToUpper(value[0])}{value[1..]}";
+                        // Resolve ambiguous shorthands before applying the "text" prefix
+                        var resolved = value.ToLowerInvariant() switch
+                        {
+                            "wave" => "textWave1",
+                            "arch" => "textArchUp",
+                            "circle" => "textCircle",
+                            "button" => "textButton",
+                            _ => value
+                        };
+                        var warpName = resolved.StartsWith("text", StringComparison.OrdinalIgnoreCase) ? resolved : $"text{char.ToUpper(resolved[0])}{resolved[1..]}";
                         var warpEnum = new Drawing.TextShapeValues(warpName);
                         var validator = new DocumentFormat.OpenXml.Validation.OpenXmlValidator();
                         var testWarp = new Drawing.PresetTextWarp(new Drawing.AdjustValueList()) { Preset = warpEnum };
