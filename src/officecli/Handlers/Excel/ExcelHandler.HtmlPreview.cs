@@ -66,7 +66,7 @@ public partial class ExcelHandler
             {
                 var rgb = tabColorEl.Rgb.Value;
                 if (rgb.Length > 6) rgb = rgb[^6..];
-                tabColorStyle = $" style=\"border-bottom:3px solid #{rgb}\"";
+                tabColorStyle = $" style=\"--tab-color:#{rgb}\"";
             }
             sb.AppendLine($"  <div class=\"sheet-tab{activeClass}\"{tabColorStyle} data-sheet=\"{i}\" role=\"tab\" tabindex=\"0\" onclick=\"switchSheet({i})\" onkeydown=\"if(event.key==='Enter'||event.key===' ')switchSheet({i})\">{HtmlEncode(sheets[i].Name)}</div>");
         }
@@ -111,6 +111,9 @@ public partial class ExcelHandler
                 sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
             return;
         }
+
+        // Create formula evaluator for this sheet to compute uncached formula values
+        var evaluator = new Core.FormulaEvaluator(sheetData, _doc.WorkbookPart);
 
         // Collect merge info
         var mergeMap = BuildMergeMap(ws);
@@ -273,7 +276,7 @@ public partial class ExcelHandler
 
                     var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
                     var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets);
-                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
+                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
                     // Adjust colspan to exclude hidden columns within the merge range
                     var adjColSpan = mergeInfo.ColSpan;
                     if (adjColSpan > 1 && hiddenCols.Count > 0)
@@ -291,7 +294,7 @@ public partial class ExcelHandler
                 {
                     var cell = cellMap.TryGetValue((r, c), out var nc) ? nc : null;
                     var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets);
-                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet) : "";
+                    var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
                     sb.Append($"<td{style}>{CellHtml(value)}</td>");
                 }
             }
@@ -684,9 +687,24 @@ public partial class ExcelHandler
     /// Get cell display value with number formatting applied for HTML preview.
     /// Handles common formats: percentage, thousands separator, decimal places, dates.
     /// </summary>
-    private string GetFormattedCellValue(Cell cell, Stylesheet? stylesheet)
+    private string GetFormattedCellValue(Cell cell, Stylesheet? stylesheet, Core.FormulaEvaluator? evaluator = null)
     {
         var rawValue = GetCellDisplayValue(cell);
+
+        // If the cell has a formula, always try to evaluate (cached values may be stale)
+        if (cell.CellFormula?.Text != null && evaluator != null)
+        {
+            var result = evaluator.TryEvaluateFull(cell.CellFormula.Text);
+            if (result != null)
+            {
+                if (result.IsError) return result.ErrorValue!;
+                rawValue = result.ToCellValueText();
+                if (result.IsString) return rawValue;
+                if (result.IsBool) return result.BoolValue!.Value ? "TRUE" : "FALSE";
+            }
+            // If evaluation fails (null), fall through to use cached value / raw display
+        }
+
         if (string.IsNullOrEmpty(rawValue)) return rawValue;
 
         // Boolean: convert 1/0 to TRUE/FALSE
@@ -993,37 +1011,31 @@ public partial class ExcelHandler
             z-index: 10;
         }
         .sheet-tab {
+            --tab-color: #e8e8e8;
             padding: 8px 16px;
             font-size: 12px;
             cursor: pointer;
-            border: 1px solid transparent;
+            border: 1px solid #bbb;
             border-top: none;
-            background: #e8e8e8;
-            margin-bottom: 4px;
-            border-radius: 0 0 4px 4px;
+            background: var(--tab-color);
+            color: #fff;
+            margin-bottom: 0;
+            border-radius: 0 0 3px 3px;
             white-space: nowrap;
             user-select: none;
             position: relative;
-            transition: background 0.2s, color 0.2s;
+            transition: background 0.15s, color 0.15s;
         }
-        .sheet-tab::after {
-            content: '';
-            position: absolute;
-            bottom: -4px; left: 4px; right: 4px;
-            height: 3px;
-            background: #217346;
-            border-radius: 2px;
-            transform: scaleX(0);
-            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        .sheet-tab[style*="--tab-color:#e8e8e8"], .sheet-tab:not([style*="--tab-color"]) {
+            color: #333;
         }
-        .sheet-tab:hover { background: #f5f5f5; }
+        .sheet-tab:hover { opacity: 0.85; }
         .sheet-tab.active {
-            background: #fff;
-            border-color: #ccc;
+            background: linear-gradient(to bottom, #fff 60%, color-mix(in srgb, var(--tab-color) 30%, #fff)) !important;
+            color: #333 !important;
+            border-color: #aaa;
+            border-bottom: 3px solid var(--tab-color);
             font-weight: 600;
-        }
-        .sheet-tab.active::after {
-            transform: scaleX(1);
         }
         .sheet-slider { flex: 1; position: relative; overflow: hidden; }
         .sheet-content { background: #fff; display: none; }

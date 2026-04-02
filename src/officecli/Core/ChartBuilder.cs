@@ -611,6 +611,19 @@ internal static partial class ChartHelper
         var solidFill = new Drawing.SolidFill();
         solidFill.AppendChild(BuildChartColorElement(color));
         spPr.AppendChild(solidFill);
+
+        // For line/scatter series, also set a:ln so Excel uses the correct stroke color
+        var parentName = series.Parent?.LocalName;
+        if (parentName is "lineChart" or "scatterChart" or "radarChart")
+        {
+            const int defaultStrokeWidthEmu = 25400; // 2pt × 12700 EMU/pt
+            var outline = new Drawing.Outline { Width = defaultStrokeWidthEmu };
+            var lnFill = new Drawing.SolidFill();
+            lnFill.AppendChild(BuildChartColorElement(color));
+            outline.AppendChild(lnFill);
+            spPr.AppendChild(outline);
+        }
+
         var serText = series.GetFirstChild<C.SeriesText>();
         if (serText != null)
             serText.InsertAfterSelf(spPr);

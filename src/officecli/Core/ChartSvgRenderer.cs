@@ -23,10 +23,12 @@ internal class ChartSvgRenderer
     public string ValueColor { get; set; } = "#D0D8E0";
     public string CatColor { get; set; } = "#C8D0D8";
     public string AxisColor { get; set; } = "#B0B8C0";
+    public string SecondaryAxisColor { get; set; } = "#aaa";
     public string GridColor { get; set; } = "#333";
     public string AxisLineColor { get; set; } = "#555";
     public int ValFontPx { get; set; } = 9;
     public int CatFontPx { get; set; } = 9;
+    public int AxisTickCount { get; set; } = 4;
 
     public static string HtmlEncode(string text) =>
         text.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;")
@@ -538,6 +540,32 @@ internal class ChartSvgRenderer
         var barIndices = new HashSet<int>();
         var lineIndices = new HashSet<int>();
         var areaIndices = new HashSet<int>();
+        var secondaryIndices = new HashSet<int>(); // series on secondary Y-axis
+
+        // Detect which axis IDs are secondary (right-side value axis)
+        var secondaryAxIds = new HashSet<uint>();
+        var valAxes = plotArea.Elements<ValueAxis>().ToList();
+        if (valAxes.Count >= 2)
+        {
+            // The secondary value axis is the one with axPos="r"
+            // Use .InnerText because AxisPositionValues.ToString() is broken in Open XML SDK v3+
+            foreach (var va in valAxes)
+            {
+                var posText = va.GetFirstChild<AxisPosition>()?.Val?.InnerText;
+                if (posText == "r")
+                {
+                    var id = va.GetFirstChild<AxisId>()?.Val?.Value;
+                    if (id.HasValue) secondaryAxIds.Add(id.Value);
+                }
+            }
+            // Fallback: if no explicit right axis found, treat 2nd valAx as secondary
+            if (secondaryAxIds.Count == 0 && valAxes.Count >= 2)
+            {
+                var id = valAxes[1].GetFirstChild<AxisId>()?.Val?.Value;
+                if (id.HasValue) secondaryAxIds.Add(id.Value);
+            }
+        }
+
         var idx = 0;
         foreach (var chartEl in plotArea.ChildElements)
         {
@@ -546,24 +574,48 @@ internal class ChartSvgRenderer
             var localName = chartEl.LocalName.ToLowerInvariant();
             var isBar = localName.Contains("bar");
             var isArea = localName.Contains("area");
+
+            // Check if this chart group uses a secondary axis
+            var axIds = chartEl.ChildElements
+                .Where(e => e.LocalName == "axId")
+                .Select(e => e.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value)
+                .Where(v => v != null)
+                .Select(v => uint.TryParse(v, out var u) ? u : 0)
+                .ToHashSet();
+            var isSecondary = axIds.Overlaps(secondaryAxIds);
+
             foreach (var _ in serElements)
             {
                 if (isBar) barIndices.Add(idx);
                 else if (isArea) areaIndices.Add(idx);
                 else lineIndices.Add(idx);
+                if (isSecondary) secondaryIndices.Add(idx);
                 idx++;
             }
         }
 
-        var allValues = seriesList.SelectMany(s => s.values).ToArray();
-        if (allValues.Length == 0) return;
-        var rawMax = allValues.Max(); if (rawMax <= 0) rawMax = 1;
-        var (maxVal, _, _) = ComputeNiceAxis(rawMax);
+        // Separate primary and secondary values for independent axis scaling
+        var primaryValues = seriesList.Where((_, i) => !secondaryIndices.Contains(i)).SelectMany(s => s.values).ToArray();
+        var secondaryValues = seriesList.Where((_, i) => secondaryIndices.Contains(i)).SelectMany(s => s.values).ToArray();
+        if (primaryValues.Length == 0 && secondaryValues.Length == 0) return;
+
+        var priMax = primaryValues.Length > 0 ? primaryValues.Max() : 0; if (priMax <= 0) priMax = 1;
+        var (priNiceMax, _, _) = ComputeNiceAxis(priMax);
+        var hasSecondary = secondaryValues.Length > 0;
+        double secNiceMax = 1;
+        if (hasSecondary)
+        {
+            var secMax = secondaryValues.Max(); if (secMax <= 0) secMax = 1;
+            (secNiceMax, _, _) = ComputeNiceAxis(secMax);
+        }
+
         var catCount = Math.Max(categories.Length, seriesList.Max(s => s.values.Length));
 
+        // Axes
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy}\" x2=\"{ox}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
         sb.AppendLine($"        <line x1=\"{ox}\" y1=\"{oy + ph}\" x2=\"{ox + pw}\" y2=\"{oy + ph}\" stroke=\"{AxisLineColor}\" stroke-width=\"1\"/>");
 
+        // Bar series (primary axis)
         var barSeries = barIndices.Where(i => i < seriesList.Count).ToList();
         if (barSeries.Count > 0)
         {
@@ -573,21 +625,24 @@ internal class ChartSvgRenderer
             for (int bi = 0; bi < barSeries.Count; bi++)
             {
                 var s = barSeries[bi];
+                var axMax = secondaryIndices.Contains(s) ? secNiceMax : priNiceMax;
                 for (int c = 0; c < seriesList[s].values.Length && c < catCount; c++)
                 {
                     var val = seriesList[s].values[c];
-                    var barH = (val / maxVal) * ph;
+                    var barH = (val / axMax) * ph;
                     sb.AppendLine($"        <rect x=\"{ox + c * groupW + gap + bi * barW:0.#}\" y=\"{oy + ph - barH:0.#}\" width=\"{barW:0.#}\" height=\"{barH:0.#}\" fill=\"{colors[s % colors.Count]}\" opacity=\"0.85\"/>");
                 }
             }
         }
+        // Area series
         foreach (var s in areaIndices.Where(i => i < seriesList.Count))
         {
+            var axMax = secondaryIndices.Contains(s) ? secNiceMax : priNiceMax;
             var points = new List<string>();
             for (int c = 0; c < seriesList[s].values.Length && c < catCount; c++)
             {
                 var px = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
-                points.Add($"{px:0.#},{oy + ph - (seriesList[s].values[c] / maxVal) * ph:0.#}");
+                points.Add($"{px:0.#},{oy + ph - (seriesList[s].values[c] / axMax) * ph:0.#}");
             }
             if (points.Count > 0)
             {
@@ -597,13 +652,15 @@ internal class ChartSvgRenderer
                 sb.AppendLine($"        <polyline points=\"{string.Join(" ", points)}\" fill=\"none\" stroke=\"{colors[s % colors.Count]}\" stroke-width=\"2\"/>");
             }
         }
+        // Line series (may use secondary axis)
         foreach (var s in lineIndices.Where(i => i < seriesList.Count))
         {
+            var axMax = secondaryIndices.Contains(s) ? secNiceMax : priNiceMax;
             var points = new List<string>();
             for (int c = 0; c < seriesList[s].values.Length && c < catCount; c++)
             {
                 var px = ox + (catCount > 1 ? (double)pw * c / (catCount - 1) : pw / 2.0);
-                points.Add($"{px:0.#},{oy + ph - (seriesList[s].values[c] / maxVal) * ph:0.#}");
+                points.Add($"{px:0.#},{oy + ph - (seriesList[s].values[c] / axMax) * ph:0.#}");
             }
             if (points.Count > 0)
             {
@@ -615,18 +672,39 @@ internal class ChartSvgRenderer
                 }
             }
         }
+        // Category labels
         for (int c = 0; c < catCount; c++)
         {
             var label = c < categories.Length ? categories[c] : "";
             var lx = ox + (double)pw * c / Math.Max(catCount, 1) + (double)pw / Math.Max(catCount, 1) / 2;
             sb.AppendLine($"        <text x=\"{lx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{CatColor}\" font-size=\"{CatFontPx}\" text-anchor=\"middle\">{HtmlEncode(label)}</text>");
         }
-        for (int t = 0; t <= 4; t++)
+        // Primary Y-axis labels (left)
+        for (int t = 0; t <= AxisTickCount; t++)
         {
-            var val = maxVal * t / 4;
-            var label = val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}";
-            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{oy + ph - (double)ph * t / 4:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
+            var val = priNiceMax * t / AxisTickCount;
+            var label = FormatAxisValue(val);
+            sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{oy + ph - (double)ph * t / AxisTickCount:0.#}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
         }
+        // Secondary Y-axis labels (overlaid on left in lighter color)
+        if (hasSecondary)
+        {
+            var secFontPx = Math.Max(ValFontPx - 1, CatFontPx);
+            for (int t = 0; t <= AxisTickCount; t++)
+            {
+                var val = secNiceMax * t / AxisTickCount;
+                var label = FormatAxisValue(val);
+                sb.AppendLine($"        <text x=\"{ox + 2}\" y=\"{oy + ph - (double)ph * t / AxisTickCount:0.#}\" fill=\"{SecondaryAxisColor}\" font-size=\"{secFontPx}\" text-anchor=\"start\" dominant-baseline=\"middle\">{label}</text>");
+            }
+        }
+    }
+
+    private static string FormatAxisValue(double val)
+    {
+        if (val == 0) return "0";
+        if (Math.Abs(val) >= 1_000_000) return $"{val / 1_000_000:0.#}M";
+        if (Math.Abs(val) >= 1_000) return $"{val / 1_000:0.#}K";
+        return val % 1 == 0 ? $"{(long)val}" : $"{val:0.#}";
     }
 
     public void RenderStockChartSvg(StringBuilder sb, PlotArea plotArea,

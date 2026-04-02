@@ -20,7 +20,7 @@ internal partial class FormulaEvaluator
         return name switch
         {
             // ===== Math & Aggregation =====
-            "SUM" => FR(nums().Sum()),
+            "SUM" => CheckRangeErrors(args) ?? FR(nums().Sum()),
             "SUMPRODUCT" => EvalSumProduct(args),
             "AVERAGE" => nums() is { Length: > 0 } a ? FR(a.Average()) : null,
             "COUNT" => FR(nums().Length),
@@ -152,7 +152,9 @@ internal partial class FormulaEvaluator
             "ISNUMBER" => FR_B(arg(0)?.IsNumeric == true),
             "ISTEXT" => FR_B(arg(0)?.IsString == true),
             "ISBLANK" => FR_B(arg(0) == null || (arg(0)?.AsString() == "" && !arg(0)!.IsNumeric)),
-            "ISERROR" or "ISERR" => FR_B(arg(0)?.IsError == true),
+            "ISERROR" or "ISERR" => args.Count > 0 && args[0] is RangeData rd_err
+                ? FormulaResult.Array(rd_err.ToFlatResults().Select(r => r?.IsError == true ? 1.0 : 0.0).ToArray())
+                : FR_B(arg(0)?.IsError == true),
             "ISNA" => FR_B(arg(0)?.ErrorValue == "#N/A"),
             "ISLOGICAL" => FR_B(arg(0)?.IsBool == true),
             "ISEVEN" => FR_B((int)num(0) % 2 == 0), "ISODD" => FR_B((int)num(0) % 2 != 0),
@@ -582,7 +584,13 @@ internal partial class FormulaEvaluator
     private FormulaResult? EvalSumProduct(List<object> args)
     {
         if (args.Count == 0) return FR(0);
-        var arrays = args.Select(a => a is RangeData rd ? rd.ToDoubleArray() : a is double[] arr ? arr : null).ToList();
+        var arrays = args.Select(a =>
+            a is RangeData rd ? rd.ToDoubleArray() :
+            a is FormulaResult fr && fr.IsArray ? fr.ArrayValue :
+            a is double[] arr ? arr : null).ToList();
+        // Single numeric value: SUMPRODUCT(scalar) = scalar
+        if (arrays.All(a => a == null) && args.Count == 1 && args[0] is FormulaResult single && single.IsNumeric)
+            return single;
         if (arrays.Any(a => a == null)) return null;
         var len = arrays.Min(a => a!.Length); double sum = 0;
         for (int i = 0; i < len; i++) { double p = 1; foreach (var arr in arrays) p *= arr![i]; sum += p; }
