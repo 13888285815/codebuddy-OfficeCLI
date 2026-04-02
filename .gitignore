@@ -29,9 +29,20 @@ diff/
 tests/
 test-results/
 
+.gitignore
+
+## IDA
+.ida-mcp/
+
 ## Claude
 .claude/
 CLAUDE.md
+
+## Local build overrides
+Directory.Build.props
+
+## CJK line-break partial declarations (local only, no reverse-engineering content)
+src/officecli/Handlers/Word/WordHandler.HtmlPreview.Cjk.cs
 
 ## Process files (local only)
 bug-reports/
