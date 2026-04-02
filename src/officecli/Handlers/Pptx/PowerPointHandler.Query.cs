@@ -30,7 +30,7 @@ public partial class PowerPointHandler
             {
                 if (sldSz.Cx?.HasValue == true) node.Format["slideWidth"] = FormatEmu(sldSz.Cx.Value);
                 if (sldSz.Cy?.HasValue == true) node.Format["slideHeight"] = FormatEmu(sldSz.Cy.Value);
-                if (sldSz.Type?.HasValue == true) node.Format["slideSize"] = sldSz.Type.InnerText switch
+                if (sldSz.Type?.HasValue == true) node.Format["slideSize"] = sldSz.Type.InnerText.ToLowerInvariant() switch
                 {
                     "screen16x9" => "widescreen",
                     "screen4x3" => "standard",
@@ -38,8 +38,8 @@ public partial class PowerPointHandler
                     "a4" => "a4",
                     "a3" => "a3",
                     "letter" => "letter",
-                    "b4ISO" => "b4",
-                    "b5ISO" => "b5",
+                    "b4iso" => "b4",
+                    "b5iso" => "b5",
                     "35mm" => "35mm",
                     "overhead" => "overhead",
                     "banner" => "banner",
