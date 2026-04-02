@@ -20,7 +20,9 @@ public partial class ExcelHandler
             case "workbook.date1904" or "date1904":
             {
                 var props = EnsureWorkbookProperties();
-                props.Date1904 = IsTruthy(value);
+                if (IsTruthy(value)) props.Date1904 = true;
+                else props.Date1904 = null;
+                CleanupEmptyWorkbookProperties();
                 SaveWorkbook();
                 return true;
             }
@@ -34,7 +36,9 @@ public partial class ExcelHandler
             case "workbook.filterprivacy" or "filterprivacy":
             {
                 var props = EnsureWorkbookProperties();
-                props.FilterPrivacy = IsTruthy(value);
+                if (IsTruthy(value)) props.FilterPrivacy = true;
+                else props.FilterPrivacy = null;
+                CleanupEmptyWorkbookProperties();
                 SaveWorkbook();
                 return true;
             }
@@ -54,14 +58,20 @@ public partial class ExcelHandler
             case "workbook.backupfile" or "backupfile":
             {
                 var props = EnsureWorkbookProperties();
-                props.BackupFile = IsTruthy(value);
+                if (IsTruthy(value)) props.BackupFile = true;
+                else props.BackupFile = null;
+                CleanupEmptyWorkbookProperties();
                 SaveWorkbook();
                 return true;
             }
             case "workbook.datecompatibility" or "datecompatibility":
             {
                 var props = EnsureWorkbookProperties();
-                props.DateCompatibility = IsTruthy(value);
+                if (IsTruthy(value))
+                    props.DateCompatibility = true;
+                else
+                    props.DateCompatibility = null;
+                CleanupEmptyWorkbookProperties();
                 SaveWorkbook();
                 return true;
             }
@@ -83,7 +93,10 @@ public partial class ExcelHandler
             case "calc.iterate" or "iterate":
             {
                 var calc = EnsureCalculationProperties();
-                calc.Iterate = IsTruthy(value);
+                if (IsTruthy(value))
+                    calc.Iterate = true;
+                else
+                    calc.Iterate = null;
                 SaveWorkbook();
                 return true;
             }
@@ -104,14 +117,20 @@ public partial class ExcelHandler
             case "calc.fullprecision" or "fullprecision":
             {
                 var calc = EnsureCalculationProperties();
-                calc.FullPrecision = IsTruthy(value);
+                if (IsTruthy(value))
+                    calc.FullPrecision = true;
+                else
+                    calc.FullPrecision = null;
                 SaveWorkbook();
                 return true;
             }
             case "calc.fullcalconload" or "fullcalconload":
             {
                 var calc = EnsureCalculationProperties();
-                calc.FullCalculationOnLoad = IsTruthy(value);
+                if (IsTruthy(value))
+                    calc.FullCalculationOnLoad = true;
+                else
+                    calc.FullCalculationOnLoad = null;
                 SaveWorkbook();
                 return true;
             }
@@ -151,14 +170,22 @@ public partial class ExcelHandler
             case "workbook.lockstructure" or "lockstructure":
             {
                 var prot = EnsureWorkbookProtection();
-                prot.LockStructure = IsTruthy(value);
+                if (IsTruthy(value))
+                    prot.LockStructure = true;
+                else
+                    prot.LockStructure = null;
+                CleanupEmptyWorkbookProtection();
                 SaveWorkbook();
                 return true;
             }
             case "workbook.lockwindows" or "lockwindows":
             {
                 var prot = EnsureWorkbookProtection();
-                prot.LockWindows = IsTruthy(value);
+                if (IsTruthy(value))
+                    prot.LockWindows = true;
+                else
+                    prot.LockWindows = null;
+                CleanupEmptyWorkbookProtection();
                 SaveWorkbook();
                 return true;
             }
@@ -220,6 +247,20 @@ public partial class ExcelHandler
         return prot;
     }
 
+    private void CleanupEmptyWorkbookProperties()
+    {
+        var props = _doc.WorkbookPart?.Workbook?.GetFirstChild<WorkbookProperties>();
+        if (props != null && !props.HasAttributes && !props.HasChildren)
+            props.Remove();
+    }
+
+    private void CleanupEmptyWorkbookProtection()
+    {
+        var prot = _doc.WorkbookPart?.Workbook?.GetFirstChild<WorkbookProtection>();
+        if (prot != null && !prot.HasAttributes && !prot.HasChildren)
+            prot.Remove();
+    }
+
     private void SaveWorkbook()
     {
         _doc.WorkbookPart?.Workbook?.Save();
@@ -237,12 +278,12 @@ public partial class ExcelHandler
         var props = workbook.GetFirstChild<WorkbookProperties>();
         if (props != null)
         {
-            if (props.Date1904?.Value != null) node.Format["workbook.date1904"] = props.Date1904.Value;
+            if (props.Date1904?.Value == true) node.Format["workbook.date1904"] = true;
             if (props.CodeName?.Value != null) node.Format["workbook.codeName"] = props.CodeName.Value;
-            if (props.FilterPrivacy?.Value != null) node.Format["workbook.filterPrivacy"] = props.FilterPrivacy.Value;
+            if (props.FilterPrivacy?.Value == true) node.Format["workbook.filterPrivacy"] = true;
             if (props.ShowObjects?.Value != null) node.Format["workbook.showObjects"] = props.ShowObjects.InnerText;
-            if (props.BackupFile?.Value != null) node.Format["workbook.backupFile"] = props.BackupFile.Value;
-            if (props.DateCompatibility?.Value != null) node.Format["workbook.dateCompatibility"] = props.DateCompatibility.Value;
+            if (props.BackupFile?.Value == true) node.Format["workbook.backupFile"] = true;
+            if (props.DateCompatibility?.Value == true) node.Format["workbook.dateCompatibility"] = true;
         }
 
         // CalculationProperties
@@ -250,11 +291,11 @@ public partial class ExcelHandler
         if (calc != null)
         {
             if (calc.CalculationMode?.Value != null) node.Format["calc.mode"] = calc.CalculationMode.InnerText;
-            if (calc.Iterate?.Value != null) node.Format["calc.iterate"] = calc.Iterate.Value;
+            if (calc.Iterate?.Value == true) node.Format["calc.iterate"] = true;
             if (calc.IterateCount?.Value != null) node.Format["calc.iterateCount"] = (int)calc.IterateCount.Value;
             if (calc.IterateDelta?.Value != null) node.Format["calc.iterateDelta"] = calc.IterateDelta.Value;
-            if (calc.FullPrecision?.Value != null) node.Format["calc.fullPrecision"] = calc.FullPrecision.Value;
-            if (calc.FullCalculationOnLoad?.Value != null) node.Format["calc.fullCalcOnLoad"] = calc.FullCalculationOnLoad.Value;
+            if (calc.FullPrecision?.Value == true) node.Format["calc.fullPrecision"] = true;
+            if (calc.FullCalculationOnLoad?.Value == true) node.Format["calc.fullCalcOnLoad"] = true;
             if (calc.ReferenceMode?.Value != null) node.Format["calc.refMode"] = calc.ReferenceMode.InnerText;
         }
 
@@ -262,8 +303,8 @@ public partial class ExcelHandler
         var prot = workbook.GetFirstChild<WorkbookProtection>();
         if (prot != null)
         {
-            if (prot.LockStructure?.Value != null) node.Format["workbook.lockStructure"] = prot.LockStructure.Value;
-            if (prot.LockWindows?.Value != null) node.Format["workbook.lockWindows"] = prot.LockWindows.Value;
+            if (prot.LockStructure?.Value == true) node.Format["workbook.lockStructure"] = true;
+            if (prot.LockWindows?.Value == true) node.Format["workbook.lockWindows"] = true;
         }
     }
 }

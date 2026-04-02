@@ -351,11 +351,11 @@ public partial class WordHandler
             if (index.Value >= 0 && index.Value < children.Count)
                 children[index.Value].InsertBeforeSelf(element);
             else
-                parent.AppendChild(element);
+                AppendToParent(parent, element);
         }
         else
         {
-            parent.AppendChild(element);
+            AppendToParent(parent, element);
         }
     }
 

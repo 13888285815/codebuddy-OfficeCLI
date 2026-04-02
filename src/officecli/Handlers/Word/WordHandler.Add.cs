@@ -129,7 +129,7 @@ public partial class WordHandler
                         ?? _doc.MainDocumentPart.AddNewPart<DocumentSettingsPart>();
                     settingsPart.Settings ??= new Settings();
                     if (settingsPart.Settings.GetFirstChild<DisplayBackgroundShape>() == null)
-                        InsertBeforeCompatibility(settingsPart.Settings, new DisplayBackgroundShape());
+                        settingsPart.Settings.AddChild(new DisplayBackgroundShape());
                     settingsPart.Settings.Save();
                     break;
 
@@ -274,7 +274,12 @@ public partial class WordHandler
         if (margin == null)
         {
             margin = new PageMargin { Top = 1440, Bottom = 1440, Left = 1800, Right = 1800 };
-            sectPr.AppendChild(margin);
+            // Insert after PageSize to maintain CT_SectPr schema order: pgSz → pgMar → ...
+            var pgSz = sectPr.GetFirstChild<PageSize>();
+            if (pgSz != null)
+                pgSz.InsertAfterSelf(margin);
+            else
+                sectPr.AddChild(margin, throwOnError: false);
         }
         return margin;
     }

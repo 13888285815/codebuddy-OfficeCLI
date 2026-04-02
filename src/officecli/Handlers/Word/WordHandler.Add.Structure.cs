@@ -238,8 +238,7 @@ public partial class WordHandler
         settingsPart2.Settings ??= new Settings();
         if (settingsPart2.Settings.GetFirstChild<UpdateFieldsOnOpen>() == null)
         {
-            var updateFields = new UpdateFieldsOnOpen { Val = true };
-            InsertBeforeCompatibility(settingsPart2.Settings, updateFields);
+            settingsPart2.Settings.AddChild(new UpdateFieldsOnOpen { Val = true });
         }
         settingsPart2.Settings.Save();
 
@@ -442,7 +441,7 @@ public partial class WordHandler
         if (headerType == HeaderFooterValues.First)
         {
             if (hSectPr.GetFirstChild<TitlePage>() == null)
-                hSectPr.AppendChild(new TitlePage());
+                hSectPr.AddChild(new TitlePage(), throwOnError: false);
         }
 
         var hIdx = mainPartH.HeaderParts.ToList().IndexOf(headerPart);
@@ -555,7 +554,7 @@ public partial class WordHandler
         if (footerType == HeaderFooterValues.First)
         {
             if (fSectPr.GetFirstChild<TitlePage>() == null)
-                fSectPr.AppendChild(new TitlePage());
+                fSectPr.AddChild(new TitlePage(), throwOnError: false);
         }
 
         var fIdx = mainPartF.FooterParts.ToList().IndexOf(footerPart);
