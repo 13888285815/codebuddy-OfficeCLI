@@ -77,8 +77,9 @@ Just describe what you want, and AionUi handles the rest.
 ## For Developers — See It Live in 30 Seconds
 
 ```bash
-# 1. Install
+# 1. Install (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
+# Windows (PowerShell): irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 
 # 2. Create a blank PowerPoint
 officecli create deck.pptx

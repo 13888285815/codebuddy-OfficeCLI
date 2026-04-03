@@ -77,8 +77,9 @@ curl -fsSL https://officecli.ai/SKILL.md
 ## 開発者向け — 30秒でライブ体験
 
 ```bash
-# 1. インストール
+# 1. インストール（macOS / Linux）
 curl -fsSL https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.sh | bash
+# Windows (PowerShell): irm https://raw.githubusercontent.com/iOfficeAI/OfficeCLI/main/install.ps1 | iex
 
 # 2. 空の PowerPoint を作成
 officecli create deck.pptx
