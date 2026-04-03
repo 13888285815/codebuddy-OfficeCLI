@@ -167,6 +167,20 @@ public partial class PowerPointHandler
             if (color != null)
                 styles.Add($"color:{color}");
 
+            // Gradient text fill
+            var gradFill = rp.GetFirstChild<Drawing.GradientFill>();
+            if (gradFill != null)
+            {
+                var gradCss = GradientToCss(gradFill, themeColors);
+                if (!string.IsNullOrEmpty(gradCss))
+                {
+                    styles.Add($"background:{gradCss}");
+                    styles.Add("-webkit-background-clip:text");
+                    styles.Add("background-clip:text");
+                    styles.Add("-webkit-text-fill-color:transparent");
+                }
+            }
+
             // Character spacing
             if (rp.Spacing?.HasValue == true)
                 styles.Add($"letter-spacing:{rp.Spacing.Value / 100.0:0.##}pt");
