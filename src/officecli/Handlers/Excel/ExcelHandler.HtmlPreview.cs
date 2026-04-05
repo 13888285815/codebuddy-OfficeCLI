@@ -48,8 +48,8 @@ public partial class ExcelHandler
             var isRtl = sheetView?.RightToLeft?.Value == true;
             var dirAttr = isRtl ? " dir=\"rtl\"" : "";
             sb.AppendLine($"<div class=\"sheet-content{activeClass}\" data-sheet=\"{sheetIdx}\"{dirAttr}>");
-            RenderSheetTable(sb, sheetName, worksheetPart, stylesheet);
-            RenderSheetCharts(sb, worksheetPart);
+            var charts = CollectSheetCharts(worksheetPart);
+            RenderSheetTable(sb, sheetName, worksheetPart, stylesheet, charts);
             sb.AppendLine("</div>");
         }
         sb.AppendLine("</div>");
@@ -100,7 +100,8 @@ public partial class ExcelHandler
 
     // ==================== Sheet Rendering ====================
 
-    private void RenderSheetTable(StringBuilder sb, string sheetName, WorksheetPart worksheetPart, Stylesheet? stylesheet)
+    private void RenderSheetTable(StringBuilder sb, string sheetName, WorksheetPart worksheetPart, Stylesheet? stylesheet,
+        List<(int fromRow, int toRow, string html)>? charts = null)
     {
         var ws = GetSheet(worksheetPart);
         var sheetData = ws.GetFirstChild<SheetData>();
@@ -117,6 +118,9 @@ public partial class ExcelHandler
 
         // Collect merge info
         var mergeMap = BuildMergeMap(ws);
+
+        // Build conditional formatting CSS overrides
+        var cfMap = BuildConditionalFormatMap(ws, stylesheet, sheetData, _doc.WorkbookPart);
 
         // Collect column widths
         var colWidths = GetColumnWidths(ws);
@@ -160,10 +164,22 @@ public partial class ExcelHandler
         // Empty sheet (SheetData exists but no rows/cells)
         if (maxRow == 0 || maxCol == 0)
         {
-            if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
-                sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
+            if (charts == null || charts.Count == 0)
+            {
+                if (worksheetPart.DrawingsPart?.WorksheetDrawing == null)
+                    sb.AppendLine("<div class=\"empty-sheet\">Empty sheet</div>");
+                return;
+            }
+            // Charts exist but no cell data — just render charts
+            foreach (var (_, _, html) in charts)
+                sb.Append(html);
             return;
         }
+
+        // Extend maxRow to include chart anchor ranges so charts render at their position
+        if (charts != null)
+            foreach (var (_, toRow, _) in charts)
+                if (toRow > maxRow) maxRow = toRow;
 
         // Limit rendering to reasonable size
         var actualRow = maxRow;
@@ -201,6 +217,41 @@ public partial class ExcelHandler
                 hiddenRows.Add(rowIdx);
         }
 
+        // Compute cumulative top offsets for frozen rows (for sticky positioning)
+        // Includes thead height (~24pt for column headers)
+        var frozenTopOffsets = new Dictionary<int, double>();
+        if (frozenRows > 0)
+        {
+            double cumTop = 24; // approximate thead (column header) height
+            for (int fr = 1; fr <= frozenRows; fr++)
+            {
+                frozenTopOffsets[fr] = cumTop;
+                if (rowHeights.TryGetValue(fr, out var rh))
+                    cumTop += rh;
+                else
+                {
+                    // Estimate row height from max font size in the row's cells
+                    double maxFontPt = 11; // default font size
+                    foreach (var cell in cellMap.Where(kv => kv.Key.row == fr).Select(kv => kv.Value))
+                    {
+                        var si = cell.StyleIndex?.Value ?? 0;
+                        if (stylesheet?.CellFormats != null && si < (uint)stylesheet.CellFormats.Elements<CellFormat>().Count())
+                        {
+                            var xf = stylesheet.CellFormats.Elements<CellFormat>().ElementAt((int)si);
+                            var fontId = xf.FontId?.Value ?? 0;
+                            if (stylesheet.Fonts != null && fontId < (uint)stylesheet.Fonts.Elements<Font>().Count())
+                            {
+                                var font = stylesheet.Fonts.Elements<Font>().ElementAt((int)fontId);
+                                var sz = font.FontSize?.Val?.Value ?? 11;
+                                if (sz > maxFontPt) maxFontPt = sz;
+                            }
+                        }
+                    }
+                    cumTop += maxFontPt * 1.4 + 4; // font height + padding
+                }
+            }
+        }
+
         // Collect hidden columns
         var hiddenCols = new HashSet<int>();
         foreach (var (colIdx, widthPx) in colWidths)
@@ -213,15 +264,13 @@ public partial class ExcelHandler
         sb.AppendLine("<table>");
         sb.AppendLine($"<caption class=\"sr-only\">{HtmlEncode(sheetName)}</caption>");
 
-        // Colgroup for column widths + header column
+        // Colgroup for column widths + header column (skip hidden columns to match td count)
         sb.Append("<colgroup><col class=\"row-header-col\">");
         for (int c = 1; c <= maxCol; c++)
         {
+            if (hiddenCols.Contains(c)) continue; // skip hidden cols — tds are also skipped
             var width = colWidths.TryGetValue(c, out var w) ? w : 48.0; // default ~8.43 chars ≈ 48pt
-            if (width <= 0)
-                sb.Append("<col style=\"width:0;visibility:collapse\">");
-            else
-                sb.Append($"<col style=\"width:{width:0.##}pt\">");
+            sb.Append($"<col style=\"width:{width:0.##}pt\">");
         }
         sb.AppendLine("</colgroup>");
 
@@ -253,17 +302,48 @@ public partial class ExcelHandler
         }
         sb.AppendLine("</tr></thead>");
 
+        // Build chart lookup: fromRow → (toRow, html) for inline insertion
+        var chartAtRow = new Dictionary<int, (int toRow, string html)>();
+        if (charts != null)
+            foreach (var (fromRow, toRow, html) in charts)
+                chartAtRow[fromRow] = (toRow, html);
+
+        // Visible column count for chart colspan
+        var visibleColCount = Enumerable.Range(1, maxCol).Count(c => !hiddenCols.Contains(c));
+
         // Data rows
         sb.AppendLine("<tbody>");
         for (int r = 1; r <= maxRow; r++)
         {
+            // Insert chart at its anchor row position
+            if (chartAtRow.TryGetValue(r, out var chartEntry))
+            {
+                sb.AppendLine($"<tr><td colspan=\"{visibleColCount + 1}\" style=\"padding:0;border:none\">");
+                sb.Append(chartEntry.html);
+                sb.AppendLine("</td></tr>");
+                r = chartEntry.toRow - 1;
+                continue;
+            }
+            if (charts != null && charts.Any(ch => r > ch.fromRow && r < ch.toRow)) continue;
+
             if (hiddenRows.Contains(r)) { sb.AppendLine("<tr style=\"display:none\"></tr>"); continue; }
-            var rowH = rowHeights.TryGetValue(r, out var rh) ? $" style=\"height:{rh:0.##}pt\"" : "";
-            sb.Append($"<tr{rowH}>");
+            bool isRowFrozen = frozenRows > 0 && r <= frozenRows;
+            var rowStyles = new List<string>();
+            if (rowHeights.TryGetValue(r, out var rh)) rowStyles.Add($"height:{rh:0.##}pt");
+            if (isRowFrozen) rowStyles.Add("background:#fff");
+            var rowStyle = rowStyles.Count > 0 ? $" style=\"{string.Join(";", rowStyles)}\"" : "";
+            var frozenAttr = isRowFrozen ? " data-frozen=\"1\"" : "";
+            sb.Append($"<tr{rowStyle}{frozenAttr}>");
 
             // Row header
-            var rowHeaderSticky = frozenCols > 0 ? " style=\"position:sticky;left:0;z-index:2\"" : "";
-            sb.Append($"<th class=\"row-header\"{rowHeaderSticky}>{r}</th>");
+            string rowHeaderStyle;
+            if (isRowFrozen)
+                rowHeaderStyle = " style=\"position:sticky;top:0;left:0;z-index:3\"";
+            else if (frozenCols > 0)
+                rowHeaderStyle = " style=\"position:sticky;left:0;z-index:2\"";
+            else
+                rowHeaderStyle = "";
+            sb.Append($"<th class=\"row-header\"{rowHeaderStyle}>{r}</th>");
 
             for (int c = 1; c <= maxCol; c++)
             {
@@ -275,7 +355,7 @@ public partial class ExcelHandler
                     if (!mergeInfo.IsAnchor) continue; // skip non-anchor cells
 
                     var cell = cellMap.TryGetValue((r, c), out var mc) ? mc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets);
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
                     // Adjust colspan to exclude hidden columns within the merge range
                     var adjColSpan = mergeInfo.ColSpan;
@@ -293,7 +373,7 @@ public partial class ExcelHandler
                 else
                 {
                     var cell = cellMap.TryGetValue((r, c), out var nc) ? nc : null;
-                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets);
+                    var style = GetCellStyleCss(cell, stylesheet, frozenRows, frozenCols, r, c, frozenLeftOffsets, frozenTopOffsets, cfMap);
                     var value = cell != null ? GetFormattedCellValue(cell, stylesheet, evaluator) : "";
                     sb.Append($"<td{style}>{CellHtml(value)}</td>");
                 }
@@ -388,9 +468,195 @@ public partial class ExcelHandler
         return (frozenRows, frozenCols);
     }
 
+    // ==================== Conditional Formatting ====================
+
+    /// <summary>
+    /// Evaluate conditional formatting rules and return CSS overrides per cell.
+    /// </summary>
+    private Dictionary<string, string> BuildConditionalFormatMap(
+        Worksheet ws, Stylesheet? stylesheet, SheetData sheetData, WorkbookPart? workbookPart)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (stylesheet == null) return result;
+
+        var dxfs = stylesheet.DifferentialFormats?.Elements<DifferentialFormat>().ToArray();
+        if (dxfs == null || dxfs.Length == 0) return result;
+
+        var cfElements = ws.Elements<ConditionalFormatting>().ToList();
+        if (cfElements.Count == 0) return result;
+
+        var evaluator = new Core.FormulaEvaluator(sheetData, workbookPart);
+
+        foreach (var cf in cfElements)
+        {
+            var sqref = cf.SequenceOfReferences?.Items?.ToList();
+            if (sqref == null || sqref.Count == 0) continue;
+
+            foreach (var rule in cf.Elements<ConditionalFormattingRule>())
+            {
+                var dxfId = rule.FormatId?.Value;
+                if (dxfId == null || dxfId >= dxfs.Length) continue;
+                var dxf = dxfs[(int)dxfId];
+
+                // Extract CSS from dxf
+                var cssParts = new List<string>();
+                var fill = dxf.Fill?.PatternFill;
+                if (fill != null)
+                {
+                    var bgColor = fill.BackgroundColor?.Rgb?.Value ?? fill.ForegroundColor?.Rgb?.Value;
+                    if (bgColor != null)
+                    {
+                        if (bgColor.Length > 6) bgColor = bgColor[^6..];
+                        cssParts.Add($"background:#{bgColor}");
+                    }
+                }
+                var font = dxf.Font;
+                if (font != null)
+                {
+                    var fontColor = font.Color?.Rgb?.Value;
+                    if (fontColor != null)
+                    {
+                        if (fontColor.Length > 6) fontColor = fontColor[^6..];
+                        cssParts.Add($"color:#{fontColor}");
+                    }
+                }
+                if (cssParts.Count == 0) continue;
+                var cssOverride = string.Join(";", cssParts);
+
+                // Expand sqref and evaluate each cell
+                foreach (var rangeStr in sqref)
+                {
+                    var cells = ExpandSqref(rangeStr.Value ?? "");
+                    foreach (var (cellRef, row, col) in cells)
+                    {
+                        if (result.ContainsKey(cellRef)) continue; // first matching rule wins
+
+                        bool matches = EvaluateCfRule(rule, cellRef, row, col, sheetData, evaluator);
+                        if (matches)
+                            result[cellRef] = cssOverride;
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Evaluate whether a conditional formatting rule matches a specific cell.</summary>
+    private bool EvaluateCfRule(ConditionalFormattingRule rule, string cellRef, int row, int col,
+        SheetData sheetData, Core.FormulaEvaluator evaluator)
+    {
+        var ruleType = rule.Type?.Value;
+
+        // Get cell value for comparison
+        double? cellValue = null;
+        var cell = sheetData.Descendants<Cell>()
+            .FirstOrDefault(c => string.Equals(c.CellReference?.Value, cellRef, StringComparison.OrdinalIgnoreCase));
+        if (cell != null)
+        {
+            if (double.TryParse(cell.CellValue?.Text, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var v))
+                cellValue = v;
+        }
+
+        if (ruleType == ConditionalFormatValues.Expression)
+        {
+            // Formula-based rule: evaluate with cell reference adjustment
+            var formula = rule.Elements<Formula>().FirstOrDefault()?.Text;
+            if (string.IsNullOrEmpty(formula)) return false;
+
+            // Adjust formula references relative to the first cell in sqref
+            // The formula is written for the top-left cell; adjust for current cell
+            var adjusted = AdjustCfFormula(formula, row, col, rule);
+            var result = evaluator.TryEvaluateFull(adjusted);
+            return result?.BoolValue == true || (result?.NumericValue != null && result.NumericValue != 0);
+        }
+
+        if (ruleType == ConditionalFormatValues.CellIs && cellValue.HasValue)
+        {
+            var op = rule.Operator?.Value;
+            var f1 = rule.Elements<Formula>().FirstOrDefault()?.Text;
+            var f2 = rule.Elements<Formula>().Skip(1).FirstOrDefault()?.Text;
+            double? v1 = f1 != null ? evaluator.TryEvaluate(f1) ?? (double.TryParse(f1, out var p1) ? p1 : null) : null;
+            double? v2 = f2 != null ? evaluator.TryEvaluate(f2) ?? (double.TryParse(f2, out var p2) ? p2 : null) : null;
+            if (v1 == null) return false;
+            if (op == ConditionalFormattingOperatorValues.GreaterThan) return cellValue > v1;
+            if (op == ConditionalFormattingOperatorValues.LessThan) return cellValue < v1;
+            if (op == ConditionalFormattingOperatorValues.GreaterThanOrEqual) return cellValue >= v1;
+            if (op == ConditionalFormattingOperatorValues.LessThanOrEqual) return cellValue <= v1;
+            if (op == ConditionalFormattingOperatorValues.Equal) return cellValue == v1;
+            if (op == ConditionalFormattingOperatorValues.NotEqual) return cellValue != v1;
+            if (op == ConditionalFormattingOperatorValues.Between) return v2.HasValue && cellValue >= v1 && cellValue <= v2;
+            if (op == ConditionalFormattingOperatorValues.NotBetween) return v2.HasValue && (cellValue < v1 || cellValue > v2);
+            return false;
+        }
+
+        return false;
+    }
+
+    /// <summary>Adjust a CF formula's cell references from the anchor cell to the target cell.</summary>
+    private string AdjustCfFormula(string formula, int targetRow, int targetCol, ConditionalFormattingRule rule)
+    {
+        // Find the anchor cell from the parent ConditionalFormatting sqref
+        var cf = rule.Parent as ConditionalFormatting;
+        var sqref = cf?.SequenceOfReferences?.Items?.FirstOrDefault()?.Value;
+        if (string.IsNullOrEmpty(sqref)) return formula;
+
+        // Extract anchor from sqref (e.g. "E7:E21" → anchor is E7)
+        var anchorRef = sqref.Contains(':') ? sqref.Split(':')[0] : sqref;
+        var (anchorColName, anchorRow) = ParseCellReference(anchorRef);
+        var anchorCol = ColumnNameToIndex(anchorColName);
+
+        var rowDelta = targetRow - anchorRow;
+        var colDelta = targetCol - anchorCol;
+        if (rowDelta == 0 && colDelta == 0) return formula;
+
+        // Replace cell references in formula, adjusting by delta
+        return Regex.Replace(formula, @"(\$?)([A-Z]+)(\$?)(\d+)", m =>
+        {
+            var colAbsolute = m.Groups[1].Value == "$";
+            var rowAbsolute = m.Groups[3].Value == "$";
+            var refCol = ColumnNameToIndex(m.Groups[2].Value);
+            var refRow = int.Parse(m.Groups[4].Value);
+
+            var newCol = colAbsolute ? refCol : refCol + colDelta;
+            var newRow = rowAbsolute ? refRow : refRow + rowDelta;
+            if (newCol < 1) newCol = 1;
+            if (newRow < 1) newRow = 1;
+            return $"{(colAbsolute ? "$" : "")}{IndexToColumnName(newCol)}{(rowAbsolute ? "$" : "")}{newRow}";
+        });
+    }
+
+    /// <summary>Expand a sqref string like "E7:E21" into individual cell references.</summary>
+    private List<(string cellRef, int row, int col)> ExpandSqref(string sqref)
+    {
+        var result = new List<(string, int, int)>();
+        foreach (var part in sqref.Split(' '))
+        {
+            if (part.Contains(':'))
+            {
+                var sides = part.Split(':');
+                var (startColName, startRow) = ParseCellReference(sides[0]);
+                var (endColName, endRow) = ParseCellReference(sides[1]);
+                var startCol = ColumnNameToIndex(startColName);
+                var endCol = ColumnNameToIndex(endColName);
+                for (int r = startRow; r <= endRow; r++)
+                    for (int c = startCol; c <= endCol; c++)
+                        result.Add(($"{IndexToColumnName(c)}{r}", r, c));
+            }
+            else
+            {
+                var (colName, row) = ParseCellReference(part);
+                result.Add((part, row, ColumnNameToIndex(colName)));
+            }
+        }
+        return result;
+    }
+
     // ==================== Cell Style to CSS ====================
 
-    private string GetCellStyleCss(Cell? cell, Stylesheet? stylesheet, int frozenRows, int frozenCols, int row, int col, Dictionary<int, double>? frozenLeftOffsets = null)
+    private string GetCellStyleCss(Cell? cell, Stylesheet? stylesheet, int frozenRows, int frozenCols, int row, int col,
+        Dictionary<int, double>? frozenLeftOffsets = null, Dictionary<int, double>? frozenTopOffsets = null,
+        Dictionary<string, string>? cfMap = null)
     {
         var styles = new List<string>();
 
@@ -399,6 +665,7 @@ public partial class ExcelHandler
         bool isFrozenCol = frozenCols > 0 && col <= frozenCols;
         // z-index layering: corner-cell=4, col-header=3, frozen-row+col=2, frozen-col=1
         var frozenLeft = frozenLeftOffsets?.TryGetValue(col, out var fl) == true ? fl : 0;
+        var frozenTop = frozenTopOffsets?.TryGetValue(row, out var ft) == true ? ft : 0;
         if (isFrozenRow && isFrozenCol)
             styles.Add($"position:sticky;top:0;left:{frozenLeft:0.##}pt;z-index:2");
         else if (isFrozenRow)
@@ -407,7 +674,11 @@ public partial class ExcelHandler
             styles.Add($"position:sticky;left:{frozenLeft:0.##}pt;z-index:1");
 
         if (cell == null || stylesheet == null)
+        {
+            // Frozen rows need opaque background so scrolling content doesn't show through
+            if (isFrozenRow) styles.Add("background:#fff");
             return styles.Count > 0 ? $" style=\"{string.Join(";", styles)}\"" : "";
+        }
 
         var styleIndex = cell.StyleIndex?.Value ?? 0;
 
@@ -422,6 +693,23 @@ public partial class ExcelHandler
                 BuildAlignmentCss(xf, styles);
             }
         }
+
+        // Conditional formatting overrides (background, color)
+        var cfCellRef = $"{IndexToColumnName(col)}{row}";
+        if (cfMap != null && cfMap.TryGetValue(cfCellRef, out var cfCss))
+        {
+            // CF overrides existing background/color — remove conflicting base styles
+            foreach (var cfPart in cfCss.Split(';'))
+            {
+                var prop = cfPart.Split(':')[0].Trim();
+                styles.RemoveAll(s => s.StartsWith(prop + ":"));
+            }
+            styles.Add(cfCss);
+        }
+
+        // Frozen rows need opaque background so scrolling content doesn't show through
+        if (isFrozenRow && !styles.Any(s => s.StartsWith("background:")))
+            styles.Add("background:#fff");
 
         return styles.Count > 0 ? $" style=\"{string.Join(";", styles)}\"" : "";
     }
@@ -1139,6 +1427,20 @@ public partial class ExcelHandler
             });
             window.scrollTo(0, 0);
         }
+        // Fix frozen row sticky top values using actual rendered heights
+        document.querySelectorAll('.table-wrapper table').forEach(function(table) {
+            var thead = table.querySelector('thead');
+            if (!thead) return;
+            var theadH = thead.offsetHeight;
+            var cumTop = theadH;
+            var frozen = table.querySelectorAll('tr[data-frozen]');
+            frozen.forEach(function(tr) {
+                tr.querySelectorAll('th, td').forEach(function(cell) {
+                    if (cell.style.position === 'sticky') cell.style.top = cumTop + 'px';
+                });
+                cumTop += tr.offsetHeight;
+            });
+        });
         """;
 
     // ==================== Utility ====================

@@ -21,8 +21,20 @@ public partial class ExcelHandler
     /// </summary>
     private void RenderSheetCharts(StringBuilder sb, WorksheetPart worksheetPart)
     {
+        var charts = CollectSheetCharts(worksheetPart);
+        foreach (var (_, _, html) in charts)
+            sb.Append(html);
+    }
+
+    /// <summary>
+    /// Pre-render all charts and return them with their anchor row positions.
+    /// Charts with overlapping row ranges are grouped into flex rows.
+    /// </summary>
+    private List<(int fromRow, int toRow, string html)> CollectSheetCharts(WorksheetPart worksheetPart)
+    {
+        var result = new List<(int fromRow, int toRow, string html)>();
         var drawingsPart = worksheetPart.DrawingsPart;
-        if (drawingsPart?.WorksheetDrawing == null) return;
+        if (drawingsPart?.WorksheetDrawing == null) return result;
 
         // Find all graphic frames that contain chart references
         var chartFrames = drawingsPart.WorksheetDrawing
@@ -30,7 +42,7 @@ public partial class ExcelHandler
             .Where(gf => gf.Descendants<C.ChartReference>().Any())
             .ToList();
 
-        if (chartFrames.Count == 0) return;
+        if (chartFrames.Count == 0) return result;
 
         // Read anchor positions and group charts into rows (overlapping row ranges = same row)
         var chartAnchors = chartFrames.Select(gf =>
@@ -47,38 +59,46 @@ public partial class ExcelHandler
         }).OrderBy(x => x.fromRow).ThenBy(x => x.fromCol).ToList();
 
         // Group into rows: charts whose row ranges overlap go in the same flex row
-        var rows = new List<List<XDR.GraphicFrame>>();
+        var groups = new List<(int fromRow, int toRow, List<XDR.GraphicFrame> frames)>();
         int currentRowEnd = -1;
-        List<XDR.GraphicFrame>? currentRow = null;
+        List<XDR.GraphicFrame>? currentGroup = null;
+        int currentFromRow = 0;
         foreach (var (gf, fromRow, toRow, _) in chartAnchors)
         {
-            if (currentRow == null || fromRow >= currentRowEnd)
+            if (currentGroup == null || fromRow >= currentRowEnd)
             {
-                currentRow = new List<XDR.GraphicFrame>();
-                rows.Add(currentRow);
+                currentGroup = new List<XDR.GraphicFrame>();
+                currentFromRow = fromRow;
                 currentRowEnd = toRow;
+                groups.Add((fromRow, toRow, currentGroup));
             }
             else
             {
                 currentRowEnd = Math.Max(currentRowEnd, toRow);
+                // Update toRow in the group
+                groups[^1] = (groups[^1].fromRow, currentRowEnd, currentGroup);
             }
-            currentRow.Add(gf);
+            currentGroup.Add(gf);
         }
 
-        foreach (var row in rows)
+        foreach (var (fromRow, toRow, frames) in groups)
         {
-            if (row.Count > 1)
+            var chartSb = new StringBuilder();
+            if (frames.Count > 1)
             {
-                sb.AppendLine("<div style=\"display:flex;gap:16px;flex-wrap:wrap\">");
-                foreach (var gf in row)
-                    RenderExcelChart(sb, gf, drawingsPart, worksheetPart);
-                sb.AppendLine("</div>");
+                chartSb.AppendLine("<div style=\"display:flex;gap:16px;flex-wrap:wrap\">");
+                foreach (var gf in frames)
+                    RenderExcelChart(chartSb, gf, drawingsPart, worksheetPart);
+                chartSb.AppendLine("</div>");
             }
             else
             {
-                RenderExcelChart(sb, row[0], drawingsPart, worksheetPart);
+                RenderExcelChart(chartSb, frames[0], drawingsPart, worksheetPart);
             }
+            result.Add((fromRow, toRow, chartSb.ToString()));
         }
+
+        return result;
     }
 
     private void RenderExcelChart(StringBuilder sb, XDR.GraphicFrame gf,
@@ -149,8 +169,9 @@ public partial class ExcelHandler
         if (info.Colors.Count > info.Series.Count && !info.ChartType.Contains("pie") && !info.ChartType.Contains("doughnut"))
             info.Colors = info.Colors.Take(info.Series.Count).ToList();
 
-        // 4. Estimate chart dimensions from TwoCellAnchor
-        var (widthPt, heightPt) = EstimateChartSize(gf);
+        // 4. Estimate chart dimensions from TwoCellAnchor using actual column widths
+        var colWidths = GetColumnWidths(GetSheet(worksheetPart));
+        var (widthPt, heightPt) = EstimateChartSize(gf, colWidths);
 
         // 5. Create renderer with Excel-appropriate colors (light background)
         var renderer = new ChartSvgRenderer
@@ -173,7 +194,8 @@ public partial class ExcelHandler
         if (chartSvgH < 80) return;
 
         var bgStyle = info.ChartFillColor != null ? $"background:#{info.ChartFillColor};" : "";
-        sb.AppendLine($"<div class=\"chart-container\" style=\"max-width:{svgW}pt;flex:1;min-width:200pt;{bgStyle}\">");
+        // Use estimated width as max-width, but allow stretching to fill parent (e.g. colspan td)
+        sb.AppendLine($"<div class=\"chart-container\" style=\"max-width:max({svgW}pt,100%);flex:1;min-width:200pt;{bgStyle}\">");
 
         if (!string.IsNullOrEmpty(info.Title))
             sb.AppendLine($"  <div style=\"text-align:center;font-size:{info.TitleFontSize};font-weight:bold;padding:6px 0;color:#333\">{HtmlEncode(info.Title)}</div>");
@@ -190,9 +212,10 @@ public partial class ExcelHandler
     }
 
     /// <summary>
-    /// Estimate chart pixel size from the TwoCellAnchor parent.
+    /// Estimate chart size from the TwoCellAnchor parent, using actual column widths when available.
     /// </summary>
-    private static (int widthPt, int heightPt) EstimateChartSize(XDR.GraphicFrame gf)
+    private static (int widthPt, int heightPt) EstimateChartSize(XDR.GraphicFrame gf,
+        Dictionary<int, double>? colWidths = null)
     {
         var anchor = gf.Parent as XDR.TwoCellAnchor;
         if (anchor == null) return (450, 263);
@@ -211,8 +234,13 @@ public partial class ExcelHandler
         var fromRowOff = long.TryParse(from.RowOffset?.Text, out var fro) ? fro : 0;
         var toRowOff = long.TryParse(to.RowOffset?.Text, out var tro) ? tro : 0;
 
-        // Default column width ~48pt, default row height ~15pt; offsets in EMU (1pt = 12700 EMU)
-        double totalWidth = (toCol - fromCol) * 48.0 + (toColOff - fromColOff) / 12700.0;
+        // Sum actual column widths; fall back to 48pt for columns without explicit width
+        double totalWidth = 0;
+        for (int c = fromCol + 1; c <= toCol; c++)
+            totalWidth += (colWidths != null && colWidths.TryGetValue(c, out var w)) ? w : 48.0;
+        totalWidth += (toColOff - fromColOff) / 12700.0;
+
+        // Default row height ~15pt; offsets in EMU (1pt = 12700 EMU)
         double totalHeight = (toRow - fromRow) * 15.0 + (toRowOff - fromRowOff) / 12700.0;
 
         return ((int)Math.Max(totalWidth, 225), (int)Math.Max(totalHeight, 150));

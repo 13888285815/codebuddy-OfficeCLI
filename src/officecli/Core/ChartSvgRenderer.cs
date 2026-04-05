@@ -39,7 +39,7 @@ internal class ChartSvgRenderer
         bool horizontal, bool stacked = false, bool percentStacked = false,
         double? ooxmlMax = null, double? ooxmlMin = null, double? ooxmlMajorUnit = null,
         int? ooxmlGapWidth = null, int valFontSize = 9, int catFontSize = 9,
-        bool showDataLabels = false)
+        bool showDataLabels = false, string? valNumFmt = null, string? plotFillColor = null)
     {
         var allValues = series.SelectMany(s => s.values).ToArray();
         if (allValues.Length == 0) return;
@@ -77,9 +77,16 @@ internal class ChartSvgRenderer
 
         if (horizontal)
         {
-            var hLabelMargin = 50;
+            // Estimate label width from longest category name (approx 0.5 × fontSize per char)
+            var maxLabelLen = categories.Length > 0 ? categories.Max(c => c.Length) : 0;
+            var hLabelMargin = (int)(maxLabelLen * catFontSize * 0.5) + 4;
             var plotOx = ox + hLabelMargin;
             var plotPw = pw - hLabelMargin;
+
+            // Plot area background starts at the Y-axis (plotOx), labels are outside
+            if (plotFillColor != null)
+                sb.AppendLine($"        <rect x=\"{plotOx}\" y=\"{oy}\" width=\"{plotPw}\" height=\"{ph}\" fill=\"#{plotFillColor}\"/>");
+
             var groupH = (double)ph / Math.Max(catCount, 1);
             var gapPct = (ooxmlGapWidth ?? 150) / 100.0;
             double barH, gap;
@@ -129,7 +136,7 @@ internal class ChartSvgRenderer
             for (int t = 0; t <= nTicks; t++)
             {
                 var val = tickStep * t;
-                var label = percentStacked ? $"{(int)val}%" : (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}");
+                var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var tx = plotOx + (double)plotPw * t / nTicks;
                 sb.AppendLine($"        <text x=\"{tx:0.#}\" y=\"{oy + ph + 16}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"middle\">{label}</text>");
             }
@@ -188,7 +195,7 @@ internal class ChartSvgRenderer
             for (int t = 0; t <= nTicks; t++)
             {
                 var val = tickStep * t;
-                var label = percentStacked ? $"{(int)val}%" : (val % 1 == 0 ? $"{(int)val}" : $"{val:0.#}");
+                var label = percentStacked ? $"{(int)val}%" : FormatAxisValue(val, valNumFmt);
                 var ty = oy + ph - (double)ph * t / nTicks;
                 sb.AppendLine($"        <text x=\"{ox - 4}\" y=\"{ty:0.#}\" fill=\"{AxisColor}\" font-size=\"{valFontSize}\" text-anchor=\"end\" dominant-baseline=\"middle\">{label}</text>");
             }
@@ -711,12 +718,55 @@ internal class ChartSvgRenderer
         }
     }
 
-    private static string FormatAxisValue(double val)
+    private static string FormatAxisValue(double val, string? numFmt = null)
     {
+        if (!string.IsNullOrEmpty(numFmt) && numFmt != "General")
+            return ApplyNumFmt(val, numFmt);
         if (val == 0) return "0";
         if (Math.Abs(val) >= 1_000_000) return $"{val / 1_000_000:0.#}M";
         if (Math.Abs(val) >= 1_000) return $"{val / 1_000:0.#}K";
         return val % 1 == 0 ? $"{(long)val}" : $"{val:0.#}";
+    }
+
+    /// <summary>Apply an OOXML number format code to a value for axis display.</summary>
+    private static string ApplyNumFmt(double val, string fmt)
+    {
+        var prefix = "";
+        var suffix = "";
+        var f = fmt;
+
+        // Extract literal prefix (e.g. "$")
+        if (f.Length > 0 && !char.IsDigit(f[0]) && f[0] != '#' && f[0] != '0' && f[0] != '.')
+        {
+            prefix = f[0].ToString();
+            f = f[1..];
+        }
+        // Extract literal suffix (e.g. "%")
+        if (f.Length > 0 && f[^1] == '%')
+        {
+            suffix = "%";
+            f = f[..^1];
+            val *= 100;
+        }
+
+        // Determine decimal places from format
+        var decIdx = f.IndexOf('.');
+        int decimals = decIdx >= 0 ? f[(decIdx + 1)..].Count(c => c is '0' or '#') : 0;
+
+        // Check if thousands separator is used (#,##0 pattern)
+        bool useThousands = f.Contains(",##") || f.Contains("#,#");
+
+        string formatted;
+        if (useThousands)
+            formatted = decimals > 0
+                ? val.ToString($"N{decimals}")
+                : ((long)val).ToString("N0");
+        else
+            formatted = decimals > 0
+                ? val.ToString($"F{decimals}")
+                : (val % 1 == 0 ? $"{(long)val}" : $"{val:0.#}");
+
+        return prefix + formatted + suffix;
     }
 
     public void RenderStockChartSvg(StringBuilder sb, PlotArea plotArea,
@@ -820,13 +870,18 @@ internal class ChartSvgRenderer
         public double? MajorUnit { get; set; }
         public int? GapWidth { get; set; }
         public string? ValAxisTitle { get; set; }
+        public int ValAxisTitleFontPx { get; set; } = 9;
+        public bool ValAxisTitleBold { get; set; }
         public string? CatAxisTitle { get; set; }
+        public int CatAxisTitleFontPx { get; set; } = 9;
+        public bool CatAxisTitleBold { get; set; }
         public string? PlotFillColor { get; set; }
         public string? ChartFillColor { get; set; }
         public bool HasLegend { get; set; }
         public string LegendFontSize { get; set; } = "8pt";
         public int ValFontPx { get; set; } = 9;
         public int CatFontPx { get; set; } = 9;
+        public string? ValNumFmt { get; set; }
     }
 
     /// <summary>Extract all chart metadata from OOXML PlotArea and Chart elements.</summary>
@@ -895,8 +950,13 @@ internal class ChartSvgRenderer
 
         if (valAxis != null)
         {
-            info.ValAxisTitle = valAxis.Elements().FirstOrDefault(e => e.LocalName == "title")
-                ?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
+            var valTitleEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "title");
+            info.ValAxisTitle = valTitleEl?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
+            var valTitleRPr = valTitleEl?.Descendants<Drawing.RunProperties>().FirstOrDefault();
+            if (valTitleRPr?.FontSize?.HasValue == true)
+                info.ValAxisTitleFontPx = (int)(valTitleRPr.FontSize.Value / 100.0);
+            if (valTitleRPr?.Bold?.Value == true)
+                info.ValAxisTitleBold = true;
             var scaling = valAxis.Elements().FirstOrDefault(e => e.LocalName == "scaling");
             if (scaling != null)
             {
@@ -911,17 +971,32 @@ internal class ChartSvgRenderer
             if (majorUnit != null && double.TryParse(majorUnit.GetAttributes().FirstOrDefault(a => a.LocalName == "val").Value, out var mu))
                 info.MajorUnit = mu;
 
-            var valFontSize = valAxis.Descendants<Drawing.RunProperties>().FirstOrDefault()?.FontSize;
-            if (valFontSize?.HasValue == true)
-                info.ValFontPx = (int)(valFontSize.Value / 100.0 * 96 / 72);
+            // Use txPr > defRPr for tick label font (not title's RunProperties)
+            var valTxPr = valAxis.Elements().FirstOrDefault(e => e.LocalName == "txPr");
+            var valDefRPr = valTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
+            if (valDefRPr?.FontSize?.HasValue == true)
+                info.ValFontPx = (int)(valDefRPr.FontSize.Value / 100.0);
+
+            // Value axis number format (e.g. "$#,##0")
+            var numFmtEl = valAxis.Elements().FirstOrDefault(e => e.LocalName == "numFmt");
+            var fmtCode = numFmtEl?.GetAttributes().FirstOrDefault(a => a.LocalName == "formatCode").Value;
+            if (!string.IsNullOrEmpty(fmtCode) && fmtCode != "General")
+                info.ValNumFmt = fmtCode;
         }
         if (catAxis != null)
         {
-            info.CatAxisTitle = catAxis.Elements().FirstOrDefault(e => e.LocalName == "title")
-                ?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
-            var catFontSize = catAxis.Descendants<Drawing.RunProperties>().FirstOrDefault()?.FontSize;
-            if (catFontSize?.HasValue == true)
-                info.CatFontPx = (int)(catFontSize.Value / 100.0 * 96 / 72);
+            var catTitleEl = catAxis.Elements().FirstOrDefault(e => e.LocalName == "title");
+            info.CatAxisTitle = catTitleEl?.Descendants<Drawing.Text>().FirstOrDefault()?.Text;
+            var catTitleRPr = catTitleEl?.Descendants<Drawing.RunProperties>().FirstOrDefault();
+            if (catTitleRPr?.FontSize?.HasValue == true)
+                info.CatAxisTitleFontPx = (int)(catTitleRPr.FontSize.Value / 100.0);
+            if (catTitleRPr?.Bold?.Value == true)
+                info.CatAxisTitleBold = true;
+            // Use txPr > defRPr for tick label font (not title's RunProperties)
+            var catTxPr = catAxis.Elements().FirstOrDefault(e => e.LocalName == "txPr");
+            var catDefRPr = catTxPr?.Descendants<Drawing.DefaultRunProperties>().FirstOrDefault();
+            if (catDefRPr?.FontSize?.HasValue == true)
+                info.CatFontPx = (int)(catDefRPr.FontSize.Value / 100.0);
         }
 
         // Gap width
@@ -1023,15 +1098,20 @@ internal class ChartSvgRenderer
         ValFontPx = info.ValFontPx;
         CatFontPx = info.CatFontPx;
 
+        // Increase right margin for long axis labels (e.g. "$1,000,000")
+        if (!string.IsNullOrEmpty(info.ValNumFmt) && marginRight < 30)
+            marginRight = 30;
+
         var plotW = svgW - marginLeft - marginRight;
         var plotH = svgH - marginTop - marginBottom;
         if (plotW < 10 || plotH < 10) return;
 
-        // Plot area background
-        if (info.PlotFillColor != null)
-            sb.AppendLine($"    <rect x=\"{marginLeft}\" y=\"{marginTop}\" width=\"{plotW}\" height=\"{plotH}\" fill=\"#{info.PlotFillColor}\"/>");
-
         var chartType = info.ChartType;
+
+        // Plot area background — for horizontal bar charts, defer to RenderBarChartSvg (labels are outside plot)
+        var isHorizBarType = chartType.Contains("bar") && !chartType.Contains("column");
+        if (info.PlotFillColor != null && !isHorizBarType)
+            sb.AppendLine($"    <rect x=\"{marginLeft}\" y=\"{marginTop}\" width=\"{plotW}\" height=\"{plotH}\" fill=\"#{info.PlotFillColor}\"/>");
 
         if (chartType.Contains("pie") || chartType.Contains("doughnut"))
         {
@@ -1072,19 +1152,30 @@ internal class ChartSvgRenderer
         {
             // Column/bar variants
             var isHorizontal = chartType.Contains("bar") && !chartType.Contains("column");
+            // Horizontal bars have their own hLabelMargin inside, so reduce outer marginLeft
+            var barMarginLeft = isHorizontal ? 5 : marginLeft;
+            var barPlotW = isHorizontal ? svgW - barMarginLeft - marginRight : plotW;
             if (info.Is3D && !info.IsStacked)
-                RenderBar3DSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, plotW, plotH, isHorizontal);
+                RenderBar3DSvg(sb, info.Series, info.Categories, info.Colors, barMarginLeft, marginTop, barPlotW, plotH, isHorizontal);
             else
-                RenderBarChartSvg(sb, info.Series, info.Categories, info.Colors, marginLeft, marginTop, plotW, plotH,
+                RenderBarChartSvg(sb, info.Series, info.Categories, info.Colors, barMarginLeft, marginTop, barPlotW, plotH,
                     isHorizontal, info.IsStacked, info.IsPercent, info.AxisMax, info.AxisMin, info.MajorUnit,
-                    info.GapWidth, ValFontPx, CatFontPx, info.ShowDataLabels);
+                    info.GapWidth, ValFontPx, CatFontPx, info.ShowDataLabels, info.ValNumFmt,
+                    isHorizontal ? info.PlotFillColor : null);
         }
 
-        // Axis titles inside SVG
-        if (!string.IsNullOrEmpty(info.ValAxisTitle))
-            sb.AppendLine($"    <text x=\"10\" y=\"{svgH / 2}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,10,{svgH / 2})\">{HtmlEncode(info.ValAxisTitle)}</text>");
-        if (!string.IsNullOrEmpty(info.CatAxisTitle))
-            sb.AppendLine($"    <text x=\"{svgW / 2}\" y=\"{svgH - 2}\" fill=\"{AxisColor}\" font-size=\"{ValFontPx}\" text-anchor=\"middle\">{HtmlEncode(info.CatAxisTitle)}</text>");
+        // Axis titles inside SVG — for horizontal bar charts, value axis is on bottom and category axis is on left
+        var isHorizBar = chartType.Contains("bar") && !chartType.Contains("column");
+        var bottomTitle = isHorizBar ? info.ValAxisTitle : info.CatAxisTitle;
+        var bottomTitleFont = isHorizBar ? info.ValAxisTitleFontPx : info.CatAxisTitleFontPx;
+        var bottomTitleBold = isHorizBar ? info.ValAxisTitleBold : info.CatAxisTitleBold;
+        var leftTitle = isHorizBar ? info.CatAxisTitle : info.ValAxisTitle;
+        var leftTitleFont = isHorizBar ? info.CatAxisTitleFontPx : info.ValAxisTitleFontPx;
+        var leftTitleBold = isHorizBar ? info.CatAxisTitleBold : info.ValAxisTitleBold;
+        if (!string.IsNullOrEmpty(leftTitle))
+            sb.AppendLine($"    <text x=\"10\" y=\"{svgH / 2}\" fill=\"{AxisColor}\" font-size=\"{leftTitleFont}\"{(leftTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\" dominant-baseline=\"middle\" transform=\"rotate(-90,10,{svgH / 2})\">{HtmlEncode(leftTitle)}</text>");
+        if (!string.IsNullOrEmpty(bottomTitle))
+            sb.AppendLine($"    <text x=\"{svgW / 2}\" y=\"{svgH - 2}\" fill=\"{AxisColor}\" font-size=\"{bottomTitleFont}\"{(bottomTitleBold ? " font-weight=\"bold\"" : "")} text-anchor=\"middle\">{HtmlEncode(bottomTitle)}</text>");
     }
 
     /// <summary>Render chart legend HTML (outside the svg tag).</summary>
@@ -1141,7 +1232,9 @@ internal class ChartSvgRenderer
 
         if (horizontal)
         {
-            var hLabelMargin = 50;
+            // Estimate label width from longest category name (approx 0.5 × fontSize per char)
+            var maxLabelLen = categories.Length > 0 ? categories.Max(c => c.Length) : 0;
+            var hLabelMargin = (int)(maxLabelLen * CatFontPx * 0.5) + 4;
             var plotOx = ox + hLabelMargin;
             var plotPw = pw - hLabelMargin;
             var groupH = (double)ph / Math.Max(catCount, 1);
