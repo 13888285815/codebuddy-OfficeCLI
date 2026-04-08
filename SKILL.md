@@ -203,9 +203,22 @@ done
 - **Group shapes select as a whole.** Clicking any shape inside a `<group>` selects the group container, not the inner shape. The CLI sees `/slide[1]/group[@id=N]`. Drilling into individual children of a group is not supported in v1.
 - **PPT and top-level Word.** Selection / mark works on `.pptx` shapes, pictures, tables, charts, connectors, groups, and on `.docx` top-level paragraphs (`<p>`/`<h1-6>`/`<li>`/`.empty`) and top-level `<table>`. Inherited layout/master decorations (footers, logos) and Word nested elements (table cells, run-level) are not addressable. **Excel `.xlsx` does not emit `data-path`** — `mark`/`selection` on xlsx will always resolve to `stale=true`. Excel support is a v2 candidate.
 
-## Marks — temporary visual annotations (no file mutation)
+## Marks — edit proposals waiting for review
 
-`mark` / `unmark` / `get-marks` attach in-memory advisory marks to document elements via the running watch process. Marks are **not written to the file** and disappear when watch closes.
+**Marks are edit proposals waiting for review.** Use `mark` when you (or the user) want to see, evaluate, and approve changes BEFORE they hit the file. Marks live in the watch process only — nothing is written to disk until a separate `set` pipeline applies them.
+
+**Decision tree — pick one:**
+
+- User doesn't need to confirm? → **`set`** directly (straight to disk). Marks are overkill for one-shot changes.
+- User wants to review before changes apply? → **`mark`** (propose → review → `set` → mark goes stale).
+- Just leaving a permanent annotation in the file? → **`add --type comment`** (Word native, persists in file).
+
+**Four-step lifecycle:**
+
+1. **Propose** — agent scans and creates marks with `find` + `tofix` + `note`.
+2. **Review** — human opens the watch URL, sees highlights, decides what to accept.
+3. **Apply** — a pipeline reads `get-marks --json` and runs real `set` commands for accepted items.
+4. **Stale** — after the underlying text changes, the mark's `find` no longer matches; `stale=true` signals "this proposal has been handled".
 
 ```bash
 officecli mark <file> <path> [--prop find=...] [--prop color=...] [--prop note=...] [--prop tofix=...] [--prop regex=true] [--json]
@@ -213,27 +226,39 @@ officecli unmark <file> [--path <p> | --all] [--json]
 officecli get-marks <file> [--json]
 ```
 
-- **Path** must be in `data-path` format as emitted by watch HTML:
-  - Word: `/body/p[N]` for paragraphs/headings/lists, `/body/table[N]` for top-level tables
-  - PowerPoint: `/slide[N]/shape[@id=ID]` (stable id form, prefer this), or `/slide[N]/shape[N]` (positional fallback when no cNvPr id)
-  - Excel: not supported in v1 — `mark` on `.xlsx` will always be `stale=true` because the Excel preview does not yet emit `data-path`
-  Native handler query paths like `/body/p[@paraId=...]` will NOT resolve as data-path. Padded paths (`" /body/p[1] "`) are auto-trimmed; pure-whitespace paths and paths not starting with `/` are rejected.
-- **find** is the literal string to highlight; `regex=true` switches to regex (or use raw-string `find='r"[abc]"'`). Catastrophic-backtracking patterns are bounded by a 500ms match timeout.
-- **color** must be a CSS color from the server-side whitelist: hex `#FFEB3B` / `#FFF` / `#FFFFFFAA`, `rgb(...)` / `rgba(...)`, or one of 22 named colors. Invalid colors are rejected with a clear error (CSS injection blocked).
-- **tofix** carries a structured proposed value for AI dry-run workflows: agent marks problems with `find` + `tofix`, human reviews in browser, then a separate pipeline applies the changes via real `set` commands.
-- All command output supports `--json` for machine consumption. Server rejections produce a non-zero exit + error envelope; do not parse "success" without checking the error field.
+| Prop | Meaning |
+|------|---------|
+| `find` | Literal text to highlight (or regex when `regex=true`; raw form `find='r"[abc]"'` also accepted). 500ms match timeout. |
+| `color` | CSS color from whitelist: hex, `rgb(...)`, or one of 22 named colors. Invalid rejected. |
+| `note` | Free-form reviewer comment. |
+| `tofix` | Structured proposed replacement value (drives the apply pipeline). |
+| `regex` | `true` to switch `find` to regex. |
 
-**Workflow — AI校对 dry-run:**
+**Path** must be `data-path` format from watch HTML: Word `/body/p[N]` or `/body/table[N]`; PPT `/slide[N]/shape[@id=ID]` (preferred) or `/slide[N]/shape[N]`. Excel is not supported in v1 (marks always resolve `stale=true`). Native query paths like `/body/p[@paraId=...]` will NOT resolve.
+
+**Worked example — propose → review → apply → stale:**
 
 ```bash
 officecli watch report.docx &
-# Agent scans the document and proposes fixes
+# 1. Propose
 officecli mark report.docx /body/p[3] --prop find="资钱" --prop tofix="资金" --prop color=red --prop note="术语错误"
-officecli mark report.docx /body/p[7] --prop 'find=[的地得]' --prop regex=true --prop color=yellow
-# Human opens browser, reviews highlights, decides what to apply
-# Apply mode (separate pipeline reads get-marks --json, runs `set` for each accepted mark)
-officecli get-marks report.docx --json | jq '.marks[] | select(.tofix != null)'
+officecli mark report.docx /body/p[7] --prop find="teh"  --prop tofix="the"  --prop color=yellow
+
+# 2. Review — human eyeballs the browser highlights, optionally unmarks bad proposals
+# 3. Apply — pipeline reads accepted marks and runs real set commands
+officecli get-marks report.docx --json \
+  | jq -r '.marks[] | select(.tofix != null) | [.path, .find, .tofix] | @tsv' \
+  | while IFS=$'\t' read -r path find tofix; do
+      officecli set report.docx "$path" --prop "find=$find" --prop "replace=$tofix"
+    done
+
+# 4. Verify — applied marks now report stale=true
+officecli get-marks report.docx --json | jq '.marks[] | {find, stale}'
 ```
+
+> **Perf note:** if you're running more than ~3 sequential `set` operations on a watched file, use `batch` instead — each `set` triggers a watch re-render which can take seconds. `batch` re-renders once at the end.
+
+All mark commands support `--json`. Server rejections produce a non-zero exit + error envelope — check the `error` field, don't assume success on empty id.
 
 ---
 
