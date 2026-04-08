@@ -1533,6 +1533,17 @@ public partial class ExcelHandler
                 // split so the downstream sheet/range lookup sees clean values.
                 sourceSpec = sourceSpec.Trim();
 
+                // R8-3: external workbook refs such as [other.xlsx]Sheet1!A1:D10
+                // used to fall through to FindWorksheet and surface as the
+                // misleading "Source sheet not found: [other.xlsx]Sheet1".
+                // Detect the '[' prefix up front and throw a clear error so
+                // users know the feature is not supported rather than blaming
+                // a missing sheet.
+                if (sourceSpec.StartsWith("["))
+                    throw new ArgumentException(
+                        "External workbook references are not supported in pivot source. "
+                        + "Use a local sheet name (e.g. Sheet1!A1:D10)");
+
                 string sourceSheetName;
                 string sourceRef;
                 if (sourceSpec.Contains('!'))
