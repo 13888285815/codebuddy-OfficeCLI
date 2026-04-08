@@ -5426,7 +5426,13 @@ internal static class PivotTableHelper
             "stddevp" or "stdp" => DataConsolidateFunctionValues.StandardDeviationP,
             "var" or "variance" => DataConsolidateFunctionValues.Variance,
             "varp" => DataConsolidateFunctionValues.VarianceP,
-            _ => DataConsolidateFunctionValues.Sum
+            // CONSISTENCY(strict-enums): mirror ParseShowDataAs / ParseFieldList —
+            // unknown tokens throw at Add/Set time so typos surface immediately
+            // instead of silently falling back to sum and producing the wrong
+            // numbers on render (Bug #3).
+            _ => throw new ArgumentException(
+                $"invalid aggregate: '{func}'. Valid: sum, count, countNums, average/avg, " +
+                "max, min, product, stdDev/std, stdDevp/stdp, var/variance, varP"),
         };
     }
 
