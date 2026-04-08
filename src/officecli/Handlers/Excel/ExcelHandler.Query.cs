@@ -40,7 +40,13 @@ public partial class ExcelHandler
             {
                 var sheetNode = new DocumentNode { Path = $"/{name}", Type = "sheet", Preview = name };
                 var sheetData = GetSheet(part).GetFirstChild<SheetData>();
-                var rowCount = sheetData?.Elements<Row>().Count() ?? 0;
+                // R6-5: dedupe by RowIndex so a pivot placed on its own source
+                // sheet doesn't double-count row children.
+                var rowCount = sheetData?.Elements<Row>()
+                    .Select(r => r.RowIndex?.Value ?? 0u)
+                    .Where(i => i != 0)
+                    .Distinct()
+                    .Count() ?? 0;
                 var chartCount = part.DrawingsPart != null ? CountExcelCharts(part.DrawingsPart) : 0;
                 sheetNode.ChildCount = rowCount + chartCount;
 
@@ -129,7 +135,7 @@ public partial class ExcelHandler
                 Path = path,
                 Type = "sheet",
                 Preview = sheetNameFromPath,
-                ChildCount = data.Elements<Row>().Count() + (worksheet.DrawingsPart != null ? CountExcelCharts(worksheet.DrawingsPart) : 0)
+                ChildCount = data.Elements<Row>().Select(r => r.RowIndex?.Value ?? 0u).Where(i => i != 0).Distinct().Count() + (worksheet.DrawingsPart != null ? CountExcelCharts(worksheet.DrawingsPart) : 0)
             };
 
             // Include freeze pane info

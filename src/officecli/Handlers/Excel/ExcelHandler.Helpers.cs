@@ -363,8 +363,17 @@ public partial class ExcelHandler
     {
         var children = new List<DocumentNode>();
         var eval = depth > 0 && worksheetPart != null ? new Core.FormulaEvaluator(sheetData, _doc.WorkbookPart) : null;
+        // R6-5: dedupe by RowIndex. When a sheet contains both source data
+        // rows and pivot-rendered rows (possible when a pivot is placed on
+        // its own source sheet), the renderer appends additional <row> nodes
+        // that can collide with existing RowIndex values. Children should
+        // expose each logical row once.
+        var seenRowIndices = new HashSet<uint>();
         foreach (var row in sheetData.Elements<Row>())
         {
+            var ridx = row.RowIndex?.Value ?? 0;
+            if (ridx != 0 && !seenRowIndices.Add(ridx))
+                continue;
             var rowIdx = row.RowIndex?.Value ?? 0;
             var rowNode = new DocumentNode
             {
