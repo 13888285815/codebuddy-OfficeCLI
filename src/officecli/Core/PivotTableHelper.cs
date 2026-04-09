@@ -139,7 +139,7 @@ internal static partial class PivotTableHelper
     /// SetPivotTableProperties (Set) so every downstream `properties["rows"]`
     /// lookup binds to user input written as `row` / `rowFields` / `ROWS`.
     /// </summary>
-    internal static string NormalizePivotPropKey(string key)
+    private static string NormalizePivotPropKey(string key)
     {
         if (string.IsNullOrEmpty(key)) return key;
         var lower = key.ToLowerInvariant();
@@ -155,7 +155,7 @@ internal static partial class PivotTableHelper
     /// reuse the same validation — previously Set accepted empty/whitespace
     /// names without any check.
     /// </summary>
-    internal static string ValidatePivotName(string name)
+    private static string ValidatePivotName(string name)
     {
         // Empty string is rejected — a blank name is always an error.
         if (string.IsNullOrEmpty(name))
@@ -209,7 +209,7 @@ internal static partial class PivotTableHelper
     /// what they typed — matches the 'unsupported echoes caller key' rule
     /// followed by the Set default case.
     /// </summary>
-    internal static List<string> CollectUnknownPivotKeys(Dictionary<string, string> properties)
+    private static List<string> CollectUnknownPivotKeys(Dictionary<string, string> properties)
     {
         var unknown = new List<string>();
         if (properties == null) return unknown;
@@ -247,7 +247,7 @@ internal static partial class PivotTableHelper
     /// echo the caller's key). Collisions between an alias and an already-
     /// present canonical key are resolved first-seen-wins.
     /// </summary>
-    internal static Dictionary<string, string> NormalizePivotProperties(
+    private static Dictionary<string, string> NormalizePivotProperties(
         Dictionary<string, string> properties)
     {
         var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -1501,7 +1501,7 @@ internal static partial class PivotTableHelper
     ///
     /// Call this at the tail of any render path that may have appended rows.
     /// </summary>
-    internal static void DedupeSheetDataRows(SheetData sheetData)
+    private static void DedupeSheetDataRows(SheetData sheetData)
     {
         // Group by RowIndex. Rows without RowIndex are left alone.
         var byIdx = new Dictionary<uint, List<Row>>();
