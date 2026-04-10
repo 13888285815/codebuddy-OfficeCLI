@@ -1,0 +1,8 @@
+[Fact]
+public void Diag_PaddedPath()
+{
+    var server = CreateBareServer();
+    var json = System.Text.Json.JsonSerializer.Serialize(new { path = "  /body/p[1]  ", color = "red" });
+    var result = server.HandleMarkAdd(json);
+    throw new Xunit.Sdk.XunitException($"JSON={json} | Result={result}");
+}
