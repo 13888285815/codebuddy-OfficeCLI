@@ -24,7 +24,7 @@ namespace OfficeCli.Tests;
 ///   BUG-TESTER-003  script/style inner text leaks into find-match extraction
 ///   BUG-FUZZER-001  Whitespace-padded color validated but stored with padding
 ///   BUG-FUZZER-003/004  Whitespace-only / no-leading-slash path accepted
-///   BUG-A-R2-M01    Bare 3/6/8-digit hex colour rejected instead of promoted
+///   BUG-A-R2-M01    Bare 3/6/8-digit hex color rejected instead of promoted
 ///   BUG-BT-R303     Validation error messages non-actionable for AI agents
 ///   BUG-TESTER-R503 Wrong HTTP verb on /api/selection falls through to HTML (200)
 ///   BUG-TESTER-R504 Unknown /api/* path falls through to HTML (200)
@@ -181,7 +181,7 @@ public sealed class BugRegressionTests : IAsyncDisposable
     /// would inject arbitrary CSS into every viewer's browser.
     ///
     /// After the fix: <c>IsValidMarkColor</c> rejects anything that is not a
-    /// recognised CSS colour value.
+    /// recognised CSS color value.
     ///
     /// <b>Proof</b>: each injection payload fails the server-side validator.
     /// </summary>
@@ -202,7 +202,7 @@ public sealed class BugRegressionTests : IAsyncDisposable
     }
 
     /// <summary>
-    /// Corollary: legitimate colour values must still pass after the fix, so the
+    /// Corollary: legitimate color values must still pass after the fix, so the
     /// validator does not break normal usage.
     /// </summary>
     [Theory]
@@ -386,11 +386,11 @@ public sealed class BugRegressionTests : IAsyncDisposable
     }
 
     // =========================================================================
-    // BUG-A-R2-M01: Bare hex colour promoted to #-prefixed form
+    // BUG-A-R2-M01: Bare hex color promoted to #-prefixed form
     // =========================================================================
 
     /// <summary>
-    /// Before the fix: bare hex colours like <c>FF00FF</c> were passed directly
+    /// Before the fix: bare hex colors like <c>FF00FF</c> were passed directly
     /// to <c>IsValidMarkColor</c> which requires the <c>#</c> prefix — they were
     /// rejected despite being unambiguously valid, breaking the CLI's convention.
     ///
@@ -414,12 +414,12 @@ public sealed class BugRegressionTests : IAsyncDisposable
         // After the fix: promoted to canonical form, then accepted.
         Assert.Equal(expected, normalized);
         Assert.True(WatchServer.IsValidMarkColor(normalized!),
-            $"Normalised form '{normalized}' must pass color validation");
+            $"Normalized form '{normalized}' must pass color validation");
     }
 
     [Theory]
     [InlineData("#FF0000")]    // already prefixed
-    [InlineData("red")]        // named colour
+    [InlineData("red")]        // named color
     [InlineData("rgb(1,2,3)")] // rgb() form
     public void BugA_R2_M01_AlreadyNormalisedColors_PassThroughUnchanged(string input)
     {
