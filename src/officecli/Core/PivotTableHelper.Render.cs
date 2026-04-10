@@ -2195,8 +2195,31 @@ internal static partial class PivotTableHelper
             sheetData.AppendChild(row);
 
             // insertBlankRow: insert an empty row after each outer group's
-            // last entry (subtotal in tabular, subtotal in compact/outline).
-            if (ActiveInsertBlankRow && rIsSubtotal && rowNode.Depth == 1)
+            // last entry. With subtotals ON, that's the depth-1 subtotal row;
+            // with subtotals OFF those positions are filtered out, so we
+            // detect end-of-group as "the next row's outermost path element
+            // differs from this row's, OR there is no next row before the
+            // grand total". This works for tabular/outline/compact alike.
+            bool insertBlank = false;
+            if (ActiveInsertBlankRow)
+            {
+                if (rIsSubtotal && rowNode.Depth == 1)
+                    insertBlank = true;
+                else if (!emitSubtotals && rIsLeaf && rowNode.Path.Length >= 1)
+                {
+                    bool isLastInGroup;
+                    if (rp == rowPositions.Count - 1)
+                        isLastInGroup = true;
+                    else
+                    {
+                        var (nextNode, _, _) = rowPositions[rp + 1];
+                        isLastInGroup = nextNode.Path.Length == 0
+                            || nextNode.Path[0] != rowNode.Path[0];
+                    }
+                    insertBlank = isLastInGroup;
+                }
+            }
+            if (insertBlank)
             {
                 blankRowOffset++;
                 var blankRow = new Row { RowIndex = (uint)(rowIdx + 1) };
