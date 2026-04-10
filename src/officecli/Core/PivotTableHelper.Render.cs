@@ -1901,12 +1901,9 @@ internal static partial class PivotTableHelper
                 int dfHeaderRowIdx = anchorRow + 1;
                 var dfHeaderRow = new Row { RowIndex = (uint)dfHeaderRowIdx };
                 WriteRowFieldHeaders(dfHeaderRow, dfHeaderRowIdx);
-                if (emitRowGrand)
-                {
-                    for (int d = 0; d < K; d++)
-                        dfHeaderRow.AppendChild(MakeStringCell(grandTotalColStart + d, dfHeaderRowIdx,
-                            valueFields[d].name));
-                }
+                for (int d = 0; d < K; d++)
+                    dfHeaderRow.AppendChild(MakeStringCell(firstDataCol + d, dfHeaderRowIdx,
+                        valueFields[d].name));
                 sheetData.AppendChild(dfHeaderRow);
             }
             else
@@ -1914,8 +1911,7 @@ internal static partial class PivotTableHelper
                 // Single header row: row-label caption(s), single data field name.
                 var headerRow = new Row { RowIndex = (uint)anchorRow };
                 WriteRowFieldHeaders(headerRow, anchorRow);
-                if (emitRowGrand)
-                    headerRow.AppendChild(MakeStringCell(grandTotalColStart, anchorRow, valueFields[0].name));
+                headerRow.AppendChild(MakeStringCell(firstDataCol, anchorRow, valueFields[0].name));
                 sheetData.AppendChild(headerRow);
             }
         }
@@ -2127,23 +2123,40 @@ internal static partial class PivotTableHelper
 
             if (!isLabelOnly)
             {
-                for (int cp = 0; cp < colPositions.Count; cp++)
+                if (colPositions.Count > 0)
                 {
-                    var (colNode, cIsLeaf, cIsSubtotal) = colPositions[cp];
-                    bool any = HasAnyValue(rowNode, colNode);
+                    for (int cp = 0; cp < colPositions.Count; cp++)
+                    {
+                        var (colNode, cIsLeaf, cIsSubtotal) = colPositions[cp];
+                        bool any = HasAnyValue(rowNode, colNode);
+                        for (int d = 0; d < K; d++)
+                        {
+                            var v = ComputeCell(rowNode, colNode, d);
+                            // Skip 0-value cells when there are no underlying values to
+                            // mirror Excel's behavior of leaving sparse intersections blank.
+                            if (any || v != 0)
+                                row.AppendChild(MakeNumericCell(colIdxByPosition[cp, d], rowIdx, v, valueStyleIds[d]));
+                        }
+                    }
+                }
+                else
+                {
+                    // No col fields: K value cells written directly. The empty
+                    // colNode matches all source rows so ComputeCell aggregates
+                    // across the entire dataset for the given row path.
+                    var emptyColNode = new AxisNode(string.Empty, 0, Array.Empty<string>());
                     for (int d = 0; d < K; d++)
                     {
-                        var v = ComputeCell(rowNode, colNode, d);
-                        // Skip 0-value cells when there are no underlying values to
-                        // mirror Excel's behavior of leaving sparse intersections blank.
-                        if (any || v != 0)
-                            row.AppendChild(MakeNumericCell(colIdxByPosition[cp, d], rowIdx, v, valueStyleIds[d]));
+                        var v = ComputeCell(rowNode, emptyColNode, d);
+                        row.AppendChild(MakeNumericCell(firstDataCol + d, rowIdx, v, valueStyleIds[d]));
                     }
                 }
             }
 
             // Grand total cells (per data field) — the row's value across all cols.
-            if (emitRowGrand && !isLabelOnly)
+            // Only applies when there ARE col fields; without col fields the value
+            // cells already aggregate across all rows (no per-row grand total needed).
+            if (emitRowGrand && !isLabelOnly && colPositions.Count > 0)
             {
                 var grandRowNode = new AxisNode(string.Empty, 0, Array.Empty<string>());
                 for (int d = 0; d < K; d++)
@@ -2169,16 +2182,29 @@ internal static partial class PivotTableHelper
             var grandRow = new Row { RowIndex = (uint)grandRowIdx };
             grandRow.AppendChild(MakeStringCell(anchorColIdx, grandRowIdx, totalLabel));
             var grandRowNodeFinal = new AxisNode(string.Empty, 0, Array.Empty<string>());
-            for (int cp = 0; cp < colPositions.Count; cp++)
+            if (colPositions.Count > 0)
             {
-                var (colNode, _, _) = colPositions[cp];
-                for (int d = 0; d < K; d++)
+                for (int cp = 0; cp < colPositions.Count; cp++)
                 {
-                    var v = ComputeCell(grandRowNodeFinal, colNode, d);
-                    grandRow.AppendChild(MakeNumericCell(colIdxByPosition[cp, d], grandRowIdx, v, valueStyleIds[d]));
+                    var (colNode, _, _) = colPositions[cp];
+                    for (int d = 0; d < K; d++)
+                    {
+                        var v = ComputeCell(grandRowNodeFinal, colNode, d);
+                        grandRow.AppendChild(MakeNumericCell(colIdxByPosition[cp, d], grandRowIdx, v, valueStyleIds[d]));
+                    }
                 }
             }
-            if (emitRowGrand)
+            else
+            {
+                // No col fields: write K value cells directly at firstDataCol.
+                var emptyColNode = new AxisNode(string.Empty, 0, Array.Empty<string>());
+                for (int d = 0; d < K; d++)
+                {
+                    var v = ComputeCell(grandRowNodeFinal, emptyColNode, d);
+                    grandRow.AppendChild(MakeNumericCell(firstDataCol + d, grandRowIdx, v, valueStyleIds[d]));
+                }
+            }
+            if (emitRowGrand && colPositions.Count > 0)
             {
                 for (int d = 0; d < K; d++)
                     grandRow.AppendChild(MakeNumericCell(grandTotalColStart + d, grandRowIdx,
