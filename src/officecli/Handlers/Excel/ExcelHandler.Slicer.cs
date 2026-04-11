@@ -300,6 +300,112 @@ public partial class ExcelHandler
             ?? throw new InvalidOperationException($"Sheet '{sheet.Name}' has no sheetId");
     }
 
+    // ==================== Pivot cache 2010 extension ====================
+
+    private const string PivotCache2010ExtUri = "{725AE2AE-9491-48be-B2B4-4EB974FC3084}";
+
+    /// <summary>
+    /// Ensure the pivot cache definition carries an Office 2010 pivot-cache
+    /// extension carrying a random-looking uint32 as pivotCacheId. This is
+    /// the ID that slicer caches reference via &lt;x14:tabular
+    /// pivotCacheId="..."/&gt; — it is NOT the same as the workbook's
+    /// &lt;pivotCache cacheId="..."&gt; attribute (which is an internal
+    /// list index). Excel real reference files use a random 32-bit uint
+    /// here. Returns the id so the caller can write it into the slicer
+    /// cache. Idempotent — reuses the existing id on re-entry.
+    /// </summary>
+    private static uint EnsurePivotCacheSlicerExtension(PivotCacheDefinition pivotCacheDef)
+    {
+        // CONSISTENCY(strongly-typed-extLst): must use PivotCacheDefinitionExtensionList,
+        // not the generic ExtensionList. The SDK has a distinct strongly-typed
+        // class for each schema-location extLst, and on reload from disk the
+        // parser produces exactly that typed instance. GetFirstChild<ExtensionList>()
+        // returns null against a PivotCacheDefinitionExtensionList child — so in
+        // direct-open mode (where every command re-reads the file), every slicer
+        // add fails the "already exists?" check, allocates a fresh ExtensionList,
+        // and appends a DUPLICATE `<extLst>` sibling. Excel then either silently
+        // "repairs" the file (popping the "We found a problem" dialog) or drops
+        // the cache extension entirely, breaking slicer ↔ pivot binding.
+        //
+        // Resident mode hid this bug: within a single handler lifetime the
+        // originally-created ExtensionList stays in memory as ExtensionList (our
+        // new-expression), so GetFirstChild<ExtensionList>() finds it and reuses
+        // it — so single-process pipelines (like the dashboard script without an
+        // intervening `close`) produced clean files while every direct-open-per-
+        // command path (including the slicer-dashboard.py pattern once `close` is
+        // interposed, and most external callers) produced broken files.
+        //
+        // Cleanup: also drop any stale ExtensionList siblings left behind by
+        // older builds of this code, so re-opening an existing broken file
+        // with a new write auto-heals it.
+        var extList = pivotCacheDef.GetFirstChild<PivotCacheDefinitionExtensionList>();
+        if (extList == null)
+        {
+            extList = new PivotCacheDefinitionExtensionList();
+            pivotCacheDef.AppendChild(extList);
+        }
+        foreach (var stale in pivotCacheDef.Elements<ExtensionList>().ToList())
+            stale.Remove();
+
+        // Look for an existing x14:pivotCacheDefinition extension; reuse
+        // its pivotCacheId so multiple slicers on the same pivot cache
+        // all reference the same id.
+        //
+        // CONSISTENCY(strongly-typed-extLst): same trap as the extLst container
+        // above — children of PivotCacheDefinitionExtensionList reload from
+        // disk as PivotCacheDefinitionExtension (NOT the generic Extension),
+        // so Elements<Extension>() misses them and we fall through to "append
+        // a brand-new extension with a fresh random pivotCacheId" on every
+        // second+ slicer. That leaves the pivotCache carrying multiple
+        // x14:pivotCacheDefinition siblings each with its own id, while
+        // individual slicerCache parts reference DIFFERENT ids — a bifurcated
+        // structure Excel trips on at load time ("We found a problem ...",
+        // even though the SDK validator treats each sibling as independently
+        // valid). Use the strongly-typed Elements<PivotCacheDefinitionExtension>
+        // so the lookup sees reloaded children.
+        //
+        // Also sweep any stale generic-Extension siblings produced by older
+        // builds, for the same auto-heal reason as the container cleanup above.
+        foreach (var staleGeneric in extList.Elements<Extension>().ToList())
+            staleGeneric.Remove();
+
+        foreach (var ext in extList.Elements<PivotCacheDefinitionExtension>())
+        {
+            if (ext.Uri?.Value != PivotCache2010ExtUri) continue;
+            var existingDef = ext.GetFirstChild<X14.PivotCacheDefinition>();
+            if (existingDef?.PivotCacheId?.HasValue == true)
+                return existingDef.PivotCacheId.Value;
+            // Extension exists but lacks the attribute — upgrade in place.
+            var upgradeId = RandomPivotCacheId();
+            if (existingDef == null)
+            {
+                existingDef = new X14.PivotCacheDefinition { PivotCacheId = upgradeId };
+                ext.Append(existingDef);
+            }
+            else
+            {
+                existingDef.PivotCacheId = upgradeId;
+            }
+            return upgradeId;
+        }
+
+        var newId = RandomPivotCacheId();
+        var newExt = new PivotCacheDefinitionExtension { Uri = PivotCache2010ExtUri };
+        newExt.AddNamespaceDeclaration("x14", X14NsUri);
+        newExt.Append(new X14.PivotCacheDefinition { PivotCacheId = newId });
+        extList.Append(newExt);
+        return newId;
+    }
+
+    /// <summary>
+    /// Generate a random 32-bit unsigned integer in the range used by
+    /// Excel-generated pivot cache ids (1 … int.MaxValue). Positive range
+    /// avoids any theoretical signed-int interop issue with downstream
+    /// consumers that may use Int32 internally.
+    /// </summary>
+    private static uint RandomPivotCacheId()
+        => (uint)Random.Shared.Next(1, int.MaxValue);
+
     // ==================== Workbook / worksheet extLst registration ====================
 
     private void RegisterSlicerCacheInWorkbook(WorkbookPart workbookPart, string slicerCachePartRelId)
@@ -403,20 +509,42 @@ public partial class ExcelHandler
             new XDR.RowOffset("0")));
 
         // mc:AlternateContent lets older Excel clients render a fallback
-        // rectangle while newer clients use the sle:slicer shape. Matches
-        // the conformance test's on-disk format.
+        // rectangle while newer clients use the sle:slicer shape. Pivot-
+        // backed slicer drawings require Choice Requires="a14" (Office
+        // 2010 main) — Excel silently drops the drawing if a15 is used.
+        // Namespace placement matches Excel reference files: `mc` on
+        // AlternateContent, `a14` on Choice.
         var altContent = new AlternateContent();
         altContent.AddNamespaceDeclaration("mc", McNsUri);
-        altContent.AddNamespaceDeclaration("a15", A15NsUri);
 
-        var choice = new AlternateContentChoice { Requires = "a15" };
+        var choice = new AlternateContentChoice { Requires = "a14" };
+        choice.AddNamespaceDeclaration("a14", A14NsUri);
         var graphicFrame = new XDR.GraphicFrame { Macro = string.Empty };
 
+        // Allocate two unique cNvPr ids per slicer — one for the Choice
+        // GraphicFrame (the one modern Excel actually renders) and one
+        // for the Fallback Shape.
+        //
+        // Historical note: earlier code matched the reference-file
+        // convention of `id="0" name=""` in the Fallback. That assumption
+        // turned out to be WRONG in practice: Excel 2019+ on macOS runs
+        // a drawing-wide ID-uniqueness integrity check at load time and
+        // trips on duplicate `id="0"` whenever a sheet has ≥ 2 slicers
+        // — the whole file pops the "We found a problem" repair dialog
+        // even though the fallback shape itself is never rendered by
+        // modern clients. The OOXML validator (SDK 3.x) also flagged it
+        // as Sem_UniqueAttributeValue. Giving each Fallback shape its
+        // own fresh id fixes both.
+        //
+        // The Max() scan includes Descendants of AlternateContentFallback,
+        // so after adding slicer N, slicer N+1 sees the updated max and
+        // keeps the monotonic allocation going.
         var nextId = drawingsPart.WorksheetDrawing
             .Descendants<XDR.NonVisualDrawingProperties>()
             .Select(p => (uint?)p.Id?.Value ?? 0u)
             .DefaultIfEmpty(1u)
             .Max() + 1;
+        var fallbackId = nextId + 1;
 
         graphicFrame.NonVisualGraphicFrameProperties = new XDR.NonVisualGraphicFrameProperties(
             new XDR.NonVisualDrawingProperties { Id = nextId, Name = slicerName },
@@ -436,7 +564,7 @@ public partial class ExcelHandler
         choice.Append(graphicFrame);
 
         var fallback = new AlternateContentFallback();
-        fallback.Append(BuildSlicerFallbackShape(slicerName));
+        fallback.Append(BuildSlicerFallbackShape(fallbackId, slicerName));
 
         altContent.Append(choice);
         altContent.Append(fallback);
