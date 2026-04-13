@@ -1630,9 +1630,7 @@ public partial class ExcelHandler
                 var dt = DateTime.FromOADate(value);
                 // Context-sensitive m/mm: after h → minute, otherwise → month
                 // Strategy: mark minute 'm' as '\x01' placeholder, then convert remaining m→M
-                var dotnetFmt = NormalizeDateFormatCase(
-                    fmtCode.Replace("AM/PM", "tt").Replace("am/pm", "tt")
-                           .Replace("A/P", "t").Replace("a/p", "t"));
+                var dotnetFmt = NormalizeDateFormatCase(fmtCode);
                 // Step 1: Replace h:mm and h:m patterns → mark minutes as placeholder
                 dotnetFmt = System.Text.RegularExpressions.Regex.Replace(dotnetFmt, @"([hH]+)([:.])(mm?)", m =>
                     m.Groups[1].Value + m.Groups[2].Value + new string('\x01', m.Groups[3].Value.Length));
@@ -1730,9 +1728,8 @@ public partial class ExcelHandler
     }
 
     /// <summary>
-    /// Normalize Excel date/time format specifiers to .NET-compatible case.
-    /// Y→y, D→d, S→s only outside quoted strings to avoid corrupting literals
-    /// like "DISCOUNT".
+    /// Normalize Excel date/time format specifiers to .NET-compatible case
+    /// and replace AM/PM → tt, A/P → t outside quoted strings.
     /// </summary>
     private static string NormalizeDateFormatCase(string fmtCode)
     {
@@ -1743,6 +1740,22 @@ public partial class ExcelHandler
             var ch = fmtCode[i];
             if (ch == '"') { inQuote = !inQuote; sb.Append(ch); continue; }
             if (inQuote) { sb.Append(ch); continue; }
+            // AM/PM → tt (check before single-char A/P)
+            if ((ch == 'A' || ch == 'a') && i + 4 < fmtCode.Length
+                && (fmtCode[i + 1] == 'M' || fmtCode[i + 1] == 'm')
+                && fmtCode[i + 2] == '/'
+                && (fmtCode[i + 3] == 'P' || fmtCode[i + 3] == 'p')
+                && (fmtCode[i + 4] == 'M' || fmtCode[i + 4] == 'm'))
+            {
+                sb.Append("tt"); i += 4; continue;
+            }
+            // A/P → t
+            if ((ch == 'A' || ch == 'a') && i + 2 < fmtCode.Length
+                && fmtCode[i + 1] == '/'
+                && (fmtCode[i + 2] == 'P' || fmtCode[i + 2] == 'p'))
+            {
+                sb.Append('t'); i += 2; continue;
+            }
             sb.Append(ch switch { 'Y' => 'y', 'D' => 'd', 'S' => 's', 'M' => 'm', 'H' => 'h', _ => ch });
         }
         return sb.ToString();
