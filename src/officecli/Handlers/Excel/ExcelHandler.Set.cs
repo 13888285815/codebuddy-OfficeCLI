@@ -936,7 +936,7 @@ public partial class ExcelHandler
                         break;
                 }
             }
-            ReorderWorksheetChildren(ws); ws.Save();
+            SaveWorksheet(worksheet);
             return unsup;
         }
 
@@ -1196,7 +1196,7 @@ public partial class ExcelHandler
         return unsupported;
     }
 
-    private static void PruneEmptyCell(Cell cell)
+    private void PruneEmptyCell(Cell cell)
     {
         var hasValue = cell.CellValue != null && !string.IsNullOrEmpty(cell.CellValue.Text);
         var hasFormula = cell.CellFormula != null;
@@ -1206,7 +1206,15 @@ public partial class ExcelHandler
             var row = cell.Parent as Row;
             cell.Remove();
             if (row != null && !row.Elements<Cell>().Any())
+            {
+                // Capture sheetData and rowIdx before detaching — row.Parent is null after Remove()
+                var sheetData = row.Parent as SheetData;
+                var rowIdx = row.RowIndex?.Value;
                 row.Remove();
+                // Keep row index cache in sync: detached row must not be returned by FindOrCreateRow
+                if (sheetData != null && rowIdx.HasValue)
+                    _rowIndex?.GetValueOrDefault(sheetData)?.Remove(rowIdx.Value);
+            }
         }
     }
 
@@ -1430,6 +1438,7 @@ public partial class ExcelHandler
                 ?? throw new InvalidOperationException("Workbook not found");
             var styleManager = new ExcelStyleManager(workbookPart);
             cell.StyleIndex = styleManager.ApplyStyle(cell, styleProps);
+            _dirtyStylesheet = true;
         }
 
         return unsupported;
@@ -1985,7 +1994,7 @@ public partial class ExcelHandler
             }
         }
 
-        ReorderWorksheetChildren(ws); ws.Save();
+        SaveWorksheet(worksheet);
         return unsupported;
     }
 
@@ -2084,11 +2093,13 @@ public partial class ExcelHandler
             catch
             {
                 ws.ReplaceChild(sheetDataBackup, sheetData);
+                // sheetData replaced — cached row entries for the old reference are stale
+                InvalidateRowIndex();
                 throw;
             }
         }
 
-        ReorderWorksheetChildren(ws); ws.Save();
+        SaveWorksheet(worksheet);
         return unsupported;
     }
 
@@ -2159,7 +2170,7 @@ public partial class ExcelHandler
             }
         }
 
-        ReorderWorksheetChildren(ws); ws.Save();
+        SaveWorksheet(worksheet);
         return unsupported;
     }
 
@@ -2247,7 +2258,7 @@ public partial class ExcelHandler
             }
         }
 
-        ReorderWorksheetChildren(ws); ws.Save();
+        SaveWorksheet(worksheet);
     }
 
     // ==================== Row Set (height, hidden) ====================
@@ -2301,7 +2312,7 @@ public partial class ExcelHandler
             }
         }
 
-        ReorderWorksheetChildren(ws); ws.Save();
+        SaveWorksheet(worksheet);
         return unsupported;
     }
 
@@ -2341,7 +2352,7 @@ public partial class ExcelHandler
             }
         }
 
-        ReorderWorksheetChildren(ws); ws.Save();
+        SaveWorksheet(worksheet);
         return unsupported;
     }
 }
