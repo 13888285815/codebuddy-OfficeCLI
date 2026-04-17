@@ -97,8 +97,20 @@ public partial class WordHandler
                 var author = child.GetAttributes().FirstOrDefault(a => a.LocalName == "author").Value;
                 var authorAttr = string.IsNullOrEmpty(author) ? "" : $" title=\"Inserted by {HtmlEncodeAttr(author)}\"";
                 sb.Append($"<span class=\"track-ins\" style=\"text-decoration:underline;color:#2E7D32\"{authorAttr}>");
-                foreach (var insRun in child.Elements<Run>())
+                // Walk all nested runs so a <w:del> or <w:hyperlink> nested
+                // inside <w:ins> doesn't drop its content (Descendants<Run>
+                // picks up runs at any depth).
+                foreach (var insRun in child.Descendants<Run>())
                     RenderRunHtml(sb, insRun, para);
+                // Also render nested deletion text (ins-of-del revision) so
+                // the reader sees what was removed within the insertion.
+                var nestedDelText = string.Concat(child.Descendants()
+                    .Where(e => e.LocalName is "del" or "moveFrom")
+                    .SelectMany(d => d.Descendants())
+                    .Where(e => e.LocalName is "delText" or "t")
+                    .Select(e => e.InnerText));
+                if (!string.IsNullOrEmpty(nestedDelText))
+                    sb.Append($"<span class=\"track-del\" style=\"text-decoration:line-through;color:#C62828\">{HtmlEncode(nestedDelText)}</span>");
                 sb.Append("</span>");
             }
             else if (child.LocalName is "del" or "moveFrom")
@@ -116,67 +128,33 @@ public partial class WordHandler
             }
             else if (child is Hyperlink hyperlink)
             {
-                var relId = hyperlink.Id?.Value;
-                string? url = null;
-                if (relId != null)
-                {
-                    try
-                    {
-                        url = _doc.MainDocumentPart?.HyperlinkRelationships
-                            .FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
-                    }
-                    catch { }
-                    if (url == null)
-                    {
-                        try
-                        {
-                            url = _doc.MainDocumentPart?.ExternalRelationships
-                                .FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
-                        }
-                        catch { }
-                    }
-                }
-
-                // Also check for internal bookmark links (Anchor property)
-                if (url == null && hyperlink.Anchor?.Value != null)
-                    url = $"#{hyperlink.Anchor.Value}";
-
-                // Scheme allowlist: an adversarial docx can embed
-                // javascript:/vbscript:/data: URLs in HyperlinkRelationships
-                // that turn into click-triggered XSS. Drop the href for
-                // anything outside http/https/mailto/tel/ftp/# — the link
-                // text still renders, just not clickable.
-                var urlSafe = url != null && IsSafeLinkUrl(url);
-                if (urlSafe)
-                    sb.Append($"<a href=\"{HtmlEncodeAttr(url!)}\"{(url!.StartsWith("#") ? "" : " target=\"_blank\"")}>");
-
-                // Render every nested Run (and nested Hyperlink) inside this
-                // hyperlink. Previously only direct Run children were scanned
-                // so nested hyperlinks and their content were silently dropped.
-                // HTML forbids nested <a>, so inner hyperlinks degrade to
-                // plain text (their runs still render).
-                foreach (var descendant in hyperlink.Descendants<Run>())
-                    RenderRunHtml(sb, descendant, para);
-
-                if (urlSafe)
-                    sb.Append("</a>");
+                RenderHyperlinkHtml(sb, hyperlink, para);
             }
             else if (child.LocalName == "oMath" || child is M.OfficeMath)
             {
                 var latex = FormulaParser.ToLatex(child);
                 sb.Append($"<span class=\"katex-formula\" data-formula=\"{HtmlEncodeAttr(latex)}\"></span>");
             }
-            else if (child.LocalName is "sdt" or "smartTag" or "customXml")
+            else if (child.LocalName is "sdt" or "smartTag" or "customXml" or "fldSimple")
             {
-                // Content controls, smart tags, custom XML — render their child runs
+                // Content controls, smart tags, custom XML, simple fields —
+                // render hyperlinks with href + their own runs (TOC entries
+                // are authored as <w:fldSimple> wrapping <w:hyperlink>),
+                // then render bare runs. Runs nested inside a hyperlink are
+                // emitted by the hyperlink branch so skip them at the
+                // outer Run pass.
+                var emittedRuns = new HashSet<OpenXmlElement>();
+                foreach (var innerHyp in child.Descendants<Hyperlink>())
+                {
+                    RenderHyperlinkHtml(sb, innerHyp, para);
+                    foreach (var r in innerHyp.Descendants<Run>())
+                        emittedRuns.Add(r);
+                }
                 foreach (var innerRun in child.Descendants<Run>())
+                {
+                    if (emittedRuns.Contains(innerRun)) continue;
                     RenderRunHtml(sb, innerRun, para);
-            }
-            else if (child.LocalName == "fldSimple")
-            {
-                // Simple field codes (page numbers, cross-refs) — render cached display text
-                foreach (var fldRun in child.Elements<Run>())
-                    RenderRunHtml(sb, fldRun, para);
+                }
             }
         }
 
@@ -559,15 +537,66 @@ public partial class WordHandler
                 ? cached
                 : FormatNoteNumber(num, fnFmt);
             sb.Append($"<div id=\"fn{fnId}\" style=\"margin:0.3em 0\"><sup>{fnLabel}</sup> ");
-            var fnParas = fn.Elements<Paragraph>().ToList();
-            for (int pi = 0; pi < fnParas.Count; pi++)
-            {
-                RenderParagraphContentHtml(sb, fnParas[pi]);
-                if (pi < fnParas.Count - 1) sb.Append("<br>");
-            }
+            RenderFootnoteChildren(sb, fn);
             sb.AppendLine($" <a href=\"#fnref{fnId}\" style=\"text-decoration:none\">\u21A9</a></div>");
         }
         sb.AppendLine("</div>");
+    }
+
+    // Render paragraphs AND tables inside a footnote/endnote. The previous
+    // implementation only iterated Elements<Paragraph>() so a footnote with
+    // a nested table silently dropped the table (and when a footnote
+    // contained only a table, the whole footnote rendered empty).
+    private void RenderHyperlinkHtml(StringBuilder sb, Hyperlink hyperlink, Paragraph para)
+    {
+        var relId = hyperlink.Id?.Value;
+        string? url = null;
+        if (relId != null)
+        {
+            try
+            {
+                url = _doc.MainDocumentPart?.HyperlinkRelationships
+                    .FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
+            }
+            catch { }
+            if (url == null)
+            {
+                try
+                {
+                    url = _doc.MainDocumentPart?.ExternalRelationships
+                        .FirstOrDefault(r => r.Id == relId)?.Uri?.ToString();
+                }
+                catch { }
+            }
+        }
+        if (url == null && hyperlink.Anchor?.Value != null)
+            url = $"#{hyperlink.Anchor.Value}";
+        var urlSafe = url != null && IsSafeLinkUrl(url);
+        if (urlSafe)
+            sb.Append($"<a href=\"{HtmlEncodeAttr(url!)}\"{(url!.StartsWith("#") ? "" : " target=\"_blank\"")}>");
+        foreach (var descendant in hyperlink.Descendants<Run>())
+            RenderRunHtml(sb, descendant, para);
+        if (urlSafe)
+            sb.Append("</a>");
+    }
+
+    private void RenderFootnoteChildren(StringBuilder sb, OpenXmlElement note)
+    {
+        bool first = true;
+        foreach (var child in note.ChildElements)
+        {
+            if (child is Paragraph p)
+            {
+                if (!first) sb.Append("<br>");
+                RenderParagraphContentHtml(sb, p);
+                first = false;
+            }
+            else if (child is Table tbl)
+            {
+                RenderTableHtml(sb, tbl);
+                first = false;
+            }
+        }
     }
 
     private void RenderEndnotesHtml(StringBuilder sb)
@@ -592,12 +621,7 @@ public partial class WordHandler
             var enIndent = ResolveStyleIndent("EndnoteText");
             var enIndentCss = enIndent != null ? $"text-indent:{enIndent}" : "";
             sb.Append($"<div id=\"en{enId}\" style=\"margin:0.3em 0;{enIndentCss}\"><sup>{enLabel}</sup> ");
-            var enParas = en.Elements<Paragraph>().ToList();
-            for (int pi = 0; pi < enParas.Count; pi++)
-            {
-                RenderParagraphContentHtml(sb, enParas[pi]);
-                if (pi < enParas.Count - 1) sb.Append("<br>");
-            }
+            RenderFootnoteChildren(sb, en);
             sb.AppendLine("</div>");
         }
         sb.AppendLine("</div>");

@@ -1018,22 +1018,33 @@ public partial class WordHandler
     /// </summary>
     private void ResolveThemeCjkFont()
     {
-        // 1. Read eastAsia language from settings (w:themeFontLang) or docDefaults (w:lang)
-        var settings = _doc.MainDocumentPart?.DocumentSettingsPart?.Settings;
-        var themeFontLang = settings?.Descendants<DocumentFormat.OpenXml.Wordprocessing.ThemeFontLanguages>().FirstOrDefault();
-        _eastAsiaLang = themeFontLang?.EastAsia?.Value;
+        // Any of the subpart accesses below (settings.xml, styles.xml,
+        // theme1.xml) can throw XmlException if the corresponding part is
+        // malformed. Catch at subpart granularity so the ViewAsHtml outer
+        // guard doesn't collapse the whole preview to a malformed stub.
+        try
+        {
+            var settings = _doc.MainDocumentPart?.DocumentSettingsPart?.Settings;
+            var themeFontLang = settings?.Descendants<DocumentFormat.OpenXml.Wordprocessing.ThemeFontLanguages>().FirstOrDefault();
+            _eastAsiaLang = themeFontLang?.EastAsia?.Value;
+        }
+        catch (System.Xml.XmlException) { }
 
-        // Also check docDefaults for w:lang eastAsia
         if (_eastAsiaLang == null)
         {
-            var docDefLang = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
-                ?.DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle
-                ?.Languages;
-            _eastAsiaLang = docDefLang?.EastAsia?.Value;
+            try
+            {
+                var docDefLang = _doc.MainDocumentPart?.StyleDefinitionsPart?.Styles
+                    ?.DocDefaults?.RunPropertiesDefault?.RunPropertiesBaseStyle
+                    ?.Languages;
+                _eastAsiaLang = docDefLang?.EastAsia?.Value;
+            }
+            catch (System.Xml.XmlException) { }
         }
 
-        // 2. Read CJK font from theme supplemental font list
-        var fontScheme = _doc.MainDocumentPart?.ThemePart?.Theme?.ThemeElements?.FontScheme;
+        DocumentFormat.OpenXml.Drawing.FontScheme? fontScheme = null;
+        try { fontScheme = _doc.MainDocumentPart?.ThemePart?.Theme?.ThemeElements?.FontScheme; }
+        catch (System.Xml.XmlException) { }
         if (fontScheme == null) return;
 
         // Map eastAsia language to OOXML script tag
