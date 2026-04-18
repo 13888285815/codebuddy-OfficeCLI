@@ -294,6 +294,18 @@ public partial class ExcelHandler
             if (flipH) xfrm.HorizontalFlip = true;
             if (flipV) xfrm.VerticalFlip = true;
         }
+        // CONSISTENCY(shape-flip): accept Office-API-style `flipH=true`,
+        // `flipV=true`, `flipBoth=true` aliases in addition to the compact
+        // `flip=h|v|both`. Boolean semantics follow IsTruthy (true/1/yes).
+        if (properties.TryGetValue("flipH", out var flipHStr) && IsTruthy(flipHStr))
+            xfrm.HorizontalFlip = true;
+        if (properties.TryGetValue("flipV", out var flipVStr) && IsTruthy(flipVStr))
+            xfrm.VerticalFlip = true;
+        if (properties.TryGetValue("flipBoth", out var flipBothStr) && IsTruthy(flipBothStr))
+        {
+            xfrm.HorizontalFlip = true;
+            xfrm.VerticalFlip = true;
+        }
     }
 
     // SH6 — build a two/three-stop linear gradient fill for shape/textbox from
