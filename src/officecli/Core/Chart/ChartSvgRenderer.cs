@@ -2122,8 +2122,14 @@ internal partial class ChartSvgRenderer
         }
         else
         {
-            for (int i = 0; i < info.Series.Count; i++)
+            // Office convention: horizontal bar charts render legend in reverse of
+            // declaration order so stacking reads top-to-bottom matching legend order.
+            // CONSISTENCY(chart-legend-order): vertical bar/column, line, area keep
+            // declaration order.
+            var isHorizBarLegend = info.ChartType.Contains("bar") && !info.ChartType.Contains("column");
+            for (int k = 0; k < info.Series.Count; k++)
             {
+                int i = isHorizBarLegend ? info.Series.Count - 1 - k : k;
                 var color = i < info.Colors.Count ? info.Colors[i] : DefaultColors[i % DefaultColors.Length];
                 sb.Append($"<span style=\"display:inline-flex;align-items:center;gap:4px\"><span style=\"display:inline-block;width:12px;height:12px;background:{color};border-radius:1px\"></span>{HtmlEncode(info.Series[i].name)}</span>");
             }
