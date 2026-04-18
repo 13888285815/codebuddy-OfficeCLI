@@ -741,10 +741,52 @@ public partial class ExcelHandler
                         });
                         break;
                     case "ref":
-                        table.Reference = value.ToUpperInvariant();
+                    {
+                        var newRef = value.ToUpperInvariant();
+                        // T5 — grow/shrink <x:tableColumns> to match the new column
+                        // count. Excel rejects the file when tableColumns.Count
+                        // mismatches the ref width. On grow, append default
+                        // ColumnN entries; on shrink, trim the trailing entries.
+                        var newParts = newRef.Split(':');
+                        if (newParts.Length == 2)
+                        {
+                            var (nsc, _) = ParseCellReference(newParts[0]);
+                            var (nec, _) = ParseCellReference(newParts[1]);
+                            int newColCount = ColumnNameToIndex(nec) - ColumnNameToIndex(nsc) + 1;
+                            var tc = table.GetFirstChild<TableColumns>();
+                            if (tc != null && newColCount > 0)
+                            {
+                                var cols = tc.Elements<TableColumn>().ToList();
+                                if (newColCount > cols.Count)
+                                {
+                                    var existingIds = cols.Select(c => c.Id?.Value ?? 0u).ToList();
+                                    var existingNames = new HashSet<string>(
+                                        cols.Select(c => c.Name?.Value ?? string.Empty),
+                                        StringComparer.OrdinalIgnoreCase);
+                                    uint nextId = existingIds.Count > 0 ? existingIds.Max() + 1 : 1u;
+                                    for (int i = cols.Count; i < newColCount; i++)
+                                    {
+                                        var baseName = $"Column{i + 1}";
+                                        var name = baseName;
+                                        int dedup = 2;
+                                        while (!existingNames.Add(name))
+                                            name = $"{baseName}{dedup++}";
+                                        tc.AppendChild(new TableColumn { Id = nextId++, Name = name });
+                                    }
+                                }
+                                else if (newColCount < cols.Count)
+                                {
+                                    for (int i = cols.Count - 1; i >= newColCount; i--)
+                                        cols[i].Remove();
+                                }
+                                tc.Count = (uint)newColCount;
+                            }
+                        }
+                        table.Reference = newRef;
                         var af = table.GetFirstChild<AutoFilter>();
-                        if (af != null) af.Reference = value.ToUpperInvariant();
+                        if (af != null) af.Reference = newRef;
                         break;
+                    }
                     case "showrowstripes" or "bandedrows" or "bandrows":
                     {
                         var si = table.GetFirstChild<TableStyleInfo>();
