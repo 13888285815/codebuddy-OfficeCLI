@@ -1353,6 +1353,74 @@ internal static partial class ChartHelper
                     break;
                 }
 
+                // CleanupE1 — dotted subkeys for toggling individual show* flags on existing
+                // dataLabels. Useful for pie charts where `datalabels.showpercent=true` should
+                // emit `<c:showPercent val="1"/>` rather than raw values.
+                case "datalabels.showvalue" or "datalabels.showval":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowValue>();
+                        dl.AppendChild(new C.ShowValue { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showpercent" or "datalabels.showpct":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowPercent>();
+                        dl.AppendChild(new C.ShowPercent { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showcatname" or "datalabels.showcategoryname" or "datalabels.showcategory":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowCategoryName>();
+                        dl.AppendChild(new C.ShowCategoryName { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showsername" or "datalabels.showseriesname" or "datalabels.showseries":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowSeriesName>();
+                        dl.AppendChild(new C.ShowSeriesName { Val = show });
+                    }
+                    break;
+                }
+
+                case "datalabels.showlegendkey":
+                {
+                    var plotArea2 = chart.GetFirstChild<C.PlotArea>();
+                    if (plotArea2 == null) { unsupported.Add(key); break; }
+                    var show = ParseHelpers.IsTruthy(value);
+                    foreach (var dl in plotArea2.Descendants<C.DataLabels>())
+                    {
+                        dl.RemoveAllChildren<C.ShowLegendKey>();
+                        dl.AppendChild(new C.ShowLegendKey { Val = show });
+                    }
+                    break;
+                }
+
                 // ==================== Border / Outline ====================
 
                 case "plotarea.border" or "plotborder":

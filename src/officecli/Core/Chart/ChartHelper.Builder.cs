@@ -414,6 +414,12 @@ internal static partial class ChartHelper
         "trendline.displayequation", "trendline.displayrsquared",
         "errbars.direction", "errbardirection",
         "datalabels.showbubblesize",
+        // CleanupE1 — per-flag dotted subkeys for DataLabels on Add.
+        "datalabels.showvalue", "datalabels.showval",
+        "datalabels.showpercent", "datalabels.showpct",
+        "datalabels.showcatname", "datalabels.showcategoryname", "datalabels.showcategory",
+        "datalabels.showsername", "datalabels.showseriesname", "datalabels.showseries",
+        "datalabels.showlegendkey",
         "axisfont", "axis.font", "legendfont", "legend.font",
         // Title styling
         "title.font", "titlefont", "title.size", "titlesize",

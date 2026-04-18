@@ -30,6 +30,38 @@ public partial class WordHandler
     private static bool IsTruthy(string? value) =>
         ParseHelpers.IsTruthy(value);
 
+    /// <summary>
+    /// Normalize a user-provided underline token to a valid Word OOXML UnderlineValues enum string.
+    /// Accepts common aliases (wavy → wave, dashdot → dotDash, etc.) plus truthy/none.
+    /// </summary>
+    internal static string NormalizeUnderlineValue(string value)
+    {
+        var v = (value ?? "").Trim();
+        return v.ToLowerInvariant() switch
+        {
+            "true" or "single" or "1" => "single",
+            "false" or "none" or "0" or "" => "none",
+            "double" => "double",
+            "thick" => "thick",
+            "dotted" => "dotted",
+            "dottedheavy" or "dotted-heavy" or "dotted_heavy" => "dottedHeavy",
+            "dash" or "dashed" => "dash",
+            "dashedheavy" or "dashheavy" => "dashedHeavy",
+            "dashlong" or "longdash" => "dashLong",
+            "dashlongheavy" or "longdashheavy" => "dashLongHeavy",
+            // Word uses "dotDash" and "dashDotHeavy" (note asymmetric casing in OOXML spec).
+            "dotdash" or "dashdot" => "dotDash",
+            "dotdashheavy" or "dashdotheavy" => "dashDotHeavy",
+            "dotdotdash" or "dashdotdot" => "dotDotDash",
+            "dotdotdashheavy" or "dashdotdotheavy" => "dashDotDotHeavy",
+            "wave" or "wavy" => "wave",
+            "waveheavy" or "wavyheavy" => "wavyHeavy",
+            "wavedouble" or "wavydouble" or "doublewave" => "wavyDouble",
+            "words" or "word" => "words",
+            _ => v  // pass-through for already-valid OOXML tokens
+        };
+    }
+
     private static JustificationValues ParseJustification(string value) =>
         value.ToLowerInvariant() switch
         {
@@ -533,7 +565,7 @@ public partial class WordHandler
                 break;
             case "underline":
                 props.RemoveAllChildren<Underline>();
-                var ulMapped = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
+                var ulMapped = NormalizeUnderlineValue(value);
                 InsertRunPropInSchemaOrder(props, new Underline { Val = new UnderlineValues(ulMapped) });
                 break;
             case "strike":

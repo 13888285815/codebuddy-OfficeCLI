@@ -682,13 +682,7 @@ public partial class WordHandler
                     case "underline":
                     {
                         var rPrU = style.StyleRunProperties ?? style.AppendChild(new StyleRunProperties());
-                        var ulVal = value.ToLowerInvariant() switch
-                        {
-                            "true" or "single" => "single",
-                            "double" => "double",
-                            "false" or "none" => "none",
-                            _ => value
-                        };
+                        var ulVal = NormalizeUnderlineValue(value);
                         rPrU.Underline = new Underline { Val = new UnderlineValues(ulVal) };
                         break;
                     }
@@ -983,12 +977,7 @@ public partial class WordHandler
                         break;
                     case "underline":
                     {
-                        var ulVal = value.ToLowerInvariant() switch
-                        {
-                            "true" => "single",
-                            "false" or "none" => "none",
-                            _ => value
-                        };
+                        var ulVal = NormalizeUnderlineValue(value);
                         EnsureRunProperties(run).Underline = new Underline
                         {
                             Val = new UnderlineValues(ulVal)
@@ -1651,7 +1640,7 @@ public partial class WordHandler
                                         break;
                                     case "underline":
                                     {
-                                        var ulVal = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
+                                        var ulVal = NormalizeUnderlineValue(value);
                                         rPr.Underline = new Underline { Val = new UnderlineValues(ulVal) };
                                         break;
                                     }
@@ -1696,7 +1685,7 @@ public partial class WordHandler
                                     break;
                                 case "underline":
                                 {
-                                    var ulVal = value.ToLowerInvariant() switch { "true" => "single", "false" or "none" => "none", _ => value };
+                                    var ulVal = NormalizeUnderlineValue(value);
                                     pmrp.RemoveAllChildren<Underline>();
                                     InsertRunPropInSchemaOrder(pmrp, new Underline { Val = new UnderlineValues(ulVal) });
                                     break;
@@ -2438,7 +2427,8 @@ public partial class WordHandler
                 return true;
             case "firstlineindent":
                 var indent = pProps.Indentation ?? (pProps.Indentation = new Indentation());
-                indent.FirstLine = value; // raw twips, consistent with Get and other indent properties
+                // Lenient input: accept "2cm", "0.5in", "18pt", or bare twips.
+                indent.FirstLine = SpacingConverter.ParseWordSpacing(value).ToString();
                 indent.Hanging = null;
                 return true;
             case "leftindent" or "indentleft" or "indent":
