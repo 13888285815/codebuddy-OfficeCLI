@@ -698,24 +698,42 @@ public partial class PowerPointHandler
                 var base64 = Convert.ToBase64String(ms.ToArray());
                 var contentType = SanitizeContentType(imgPart.ContentType ?? "image/png");
 
-                // Crop
+                // Crop — PowerPoint srcRect semantics: select a rectangular region of the
+                // source image, then scale that region to fill the container.
+                // CSS equivalent: render as a <div> with background-image, setting
+                // background-size = container / visibleFraction and background-position
+                // so the srcRect region aligns to the container edge.
                 var srcRect = blipFill?.GetFirstChild<Drawing.SourceRectangle>();
-                var imgStyles = new List<string>();
+                double srcL = 0, srcT = 0, srcR = 0, srcB = 0;
                 if (srcRect != null)
                 {
-                    var cl = (srcRect.Left?.Value ?? 0) / 1000.0;
-                    var ct = (srcRect.Top?.Value ?? 0) / 1000.0;
-                    var cr = (srcRect.Right?.Value ?? 0) / 1000.0;
-                    var cb = (srcRect.Bottom?.Value ?? 0) / 1000.0;
-                    if (cl != 0 || ct != 0 || cr != 0 || cb != 0)
-                    {
-                        // Use clip-path for cropping
-                        imgStyles.Add($"clip-path:inset({ct:0.##}% {cr:0.##}% {cb:0.##}% {cl:0.##}%)");
-                    }
+                    srcL = (srcRect.Left?.Value ?? 0) / 100000.0;
+                    srcT = (srcRect.Top?.Value ?? 0) / 100000.0;
+                    srcR = (srcRect.Right?.Value ?? 0) / 100000.0;
+                    srcB = (srcRect.Bottom?.Value ?? 0) / 100000.0;
                 }
-
-                var imgStyle = imgStyles.Count > 0 ? $" style=\"{string.Join(";", imgStyles)}\"" : "";
-                sb.Append($"<img src=\"data:{contentType};base64,{base64}\"{imgStyle} loading=\"lazy\">");
+                var hasCrop = srcL != 0 || srcT != 0 || srcR != 0 || srcB != 0;
+                if (hasCrop)
+                {
+                    var visibleW = Math.Max(1 - srcL - srcR, 0.0001);
+                    var visibleH = Math.Max(1 - srcT - srcB, 0.0001);
+                    var bgSizeW = 100.0 / visibleW;
+                    var bgSizeH = 100.0 / visibleH;
+                    // background-position percentage semantics: pos% aligns pos%-of-image with pos%-of-container.
+                    // To align srcRect (image region starting at fraction L) with container's left edge:
+                    //   pos_x% = L / (srcL + srcR) * 100   (denominator = 1 - visibleW)
+                    // Fallback to 0 when there's no crop on that axis (denominator == 0).
+                    var denomX = srcL + srcR;
+                    var denomY = srcT + srcB;
+                    var bgPosX = denomX > 0 ? (srcL / denomX) * 100.0 : 0.0;
+                    var bgPosY = denomY > 0 ? (srcT / denomY) * 100.0 : 0.0;
+                    var bgStyle = $"width:100%;height:100%;background-image:url(data:{contentType};base64,{base64});background-repeat:no-repeat;background-size:{bgSizeW:0.##}% {bgSizeH:0.##}%;background-position:{bgPosX:0.##}% {bgPosY:0.##}%";
+                    sb.Append($"<div style=\"{bgStyle}\"></div>");
+                }
+                else
+                {
+                    sb.Append($"<img src=\"data:{contentType};base64,{base64}\" loading=\"lazy\">");
+                }
             }
             catch
             {
