@@ -1956,9 +1956,25 @@ public partial class PowerPointHandler
                     {
                         var grpSpPr = grp.GroupShapeProperties ?? (grp.GroupShapeProperties = new GroupShapeProperties());
                         var xfrm = grpSpPr.TransformGroup ?? (grpSpPr.TransformGroup = new Drawing.TransformGroup());
-                        TryApplyPositionSize(key.ToLowerInvariant(), value,
-                            xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset()),
-                            xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents()));
+                        var off = xfrm.Offset ?? (xfrm.Offset = new Drawing.Offset());
+                        var ext = xfrm.Extents ?? (xfrm.Extents = new Drawing.Extents());
+                        var keyLower = key.ToLowerInvariant();
+                        // CONSISTENCY(group-scale-baseline): group scaling needs <a:chOff>/<a:chExt>
+                        // as a child-coordinate baseline. Before we mutate ext/off, snapshot the
+                        // current ext/off into chExt/chOff if they aren't already present — that
+                        // way the first Set of width/height captures the "before" as the logical
+                        // child coordinate space, so shrinking ext shrinks the rendered children.
+                        if (keyLower is "x" or "y")
+                        {
+                            if (xfrm.ChildOffset == null)
+                                xfrm.ChildOffset = new Drawing.ChildOffset { X = off.X ?? 0, Y = off.Y ?? 0 };
+                        }
+                        else // width or height
+                        {
+                            if (xfrm.ChildExtents == null)
+                                xfrm.ChildExtents = new Drawing.ChildExtents { Cx = ext.Cx ?? 0, Cy = ext.Cy ?? 0 };
+                        }
+                        TryApplyPositionSize(keyLower, value, off, ext);
                         break;
                     }
                     case "rotation" or "rotate":
