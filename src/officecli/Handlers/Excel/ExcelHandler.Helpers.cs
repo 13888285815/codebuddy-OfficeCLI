@@ -1,6 +1,7 @@
 // Copyright 2025 OfficeCli (officecli.ai)
 // SPDX-License-Identifier: Apache-2.0
 
+using System.Reflection;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
@@ -2119,42 +2120,57 @@ public partial class ExcelHandler
     /// </summary>
     // CONSISTENCY(shape-preset): mirror PowerPointHandler.ParsePresetShape token
     // set so Excel `add shape preset=X` accepts the same vocabulary as PPT.
-    private static Drawing.ShapeTypeValues ParseExcelShapePreset(string name) =>
-        name.Trim().ToLowerInvariant() switch
+    //
+    // Exhaustive map covering every OOXML preset token. Built once via
+    // reflection over `Drawing.ShapeTypeValues` static properties — each
+    // property's default `ToString()` (== OpenXml IEnumValue.Value) is the
+    // OOXML token such as "smileyFace", "flowChartProcess", "lightningBolt".
+    // We then overlay friendly aliases (oval, cylinder, rarrow, …).
+    private static readonly Dictionary<string, Drawing.ShapeTypeValues> _shapePresetMap =
+        BuildShapePresetMap();
+
+    private static Dictionary<string, Drawing.ShapeTypeValues> BuildShapePresetMap()
+    {
+        var map = new Dictionary<string, Drawing.ShapeTypeValues>(StringComparer.Ordinal);
+        foreach (var p in typeof(Drawing.ShapeTypeValues)
+            .GetProperties(BindingFlags.Public | BindingFlags.Static)
+            .Where(p => p.PropertyType == typeof(Drawing.ShapeTypeValues)))
         {
-            "rect" or "rectangle" => Drawing.ShapeTypeValues.Rectangle,
-            "roundrect" or "roundedrectangle" => Drawing.ShapeTypeValues.RoundRectangle,
-            "ellipse" or "oval" => Drawing.ShapeTypeValues.Ellipse,
-            "triangle" => Drawing.ShapeTypeValues.Triangle,
-            "rtriangle" or "righttriangle" => Drawing.ShapeTypeValues.RightTriangle,
-            "diamond" => Drawing.ShapeTypeValues.Diamond,
-            "parallelogram" => Drawing.ShapeTypeValues.Parallelogram,
-            "trapezoid" => Drawing.ShapeTypeValues.Trapezoid,
-            "pentagon" => Drawing.ShapeTypeValues.Pentagon,
-            "hexagon" => Drawing.ShapeTypeValues.Hexagon,
-            "heptagon" => Drawing.ShapeTypeValues.Heptagon,
-            "octagon" => Drawing.ShapeTypeValues.Octagon,
-            "star4" => Drawing.ShapeTypeValues.Star4,
-            "star5" => Drawing.ShapeTypeValues.Star5,
-            "star6" => Drawing.ShapeTypeValues.Star6,
-            "star8" => Drawing.ShapeTypeValues.Star8,
-            "rightarrow" or "rarrow" => Drawing.ShapeTypeValues.RightArrow,
-            "leftarrow" or "larrow" => Drawing.ShapeTypeValues.LeftArrow,
-            "uparrow" => Drawing.ShapeTypeValues.UpArrow,
-            "downarrow" => Drawing.ShapeTypeValues.DownArrow,
-            "chevron" => Drawing.ShapeTypeValues.Chevron,
-            "plus" or "cross" => Drawing.ShapeTypeValues.Plus,
-            "heart" => Drawing.ShapeTypeValues.Heart,
-            "cloud" => Drawing.ShapeTypeValues.Cloud,
-            "sun" => Drawing.ShapeTypeValues.Sun,
-            "moon" => Drawing.ShapeTypeValues.Moon,
-            "arc" => Drawing.ShapeTypeValues.Arc,
-            "donut" => Drawing.ShapeTypeValues.Donut,
-            "cube" => Drawing.ShapeTypeValues.Cube,
-            "can" or "cylinder" => Drawing.ShapeTypeValues.Can,
-            "line" => Drawing.ShapeTypeValues.Line,
-            _ => Drawing.ShapeTypeValues.Rectangle
-        };
+            if (p.GetValue(null) is not Drawing.ShapeTypeValues val) continue;
+            // IEnumValue.Value is the OOXML token, e.g. "smileyFace". Do not
+            // use ToString() — on OpenXml SDK 3.x record-struct wrappers it
+            // returns "ShapeTypeValues { }" instead of the token.
+            var token = (val as IEnumValue)?.Value;
+            if (string.IsNullOrEmpty(token)) continue;
+            map[token.ToLowerInvariant()] = val;
+        }
+
+        // Friendly aliases layered on top (key must be lowercase).
+        void Alias(string alias, Drawing.ShapeTypeValues v) => map[alias] = v;
+        Alias("rectangle", Drawing.ShapeTypeValues.Rectangle);
+        Alias("roundedrectangle", Drawing.ShapeTypeValues.RoundRectangle);
+        Alias("oval", Drawing.ShapeTypeValues.Ellipse);
+        Alias("righttriangle", Drawing.ShapeTypeValues.RightTriangle);
+        Alias("rtriangle", Drawing.ShapeTypeValues.RightTriangle);
+        Alias("rarrow", Drawing.ShapeTypeValues.RightArrow);
+        Alias("larrow", Drawing.ShapeTypeValues.LeftArrow);
+        Alias("cross", Drawing.ShapeTypeValues.Plus);
+        Alias("cylinder", Drawing.ShapeTypeValues.Can);
+        return map;
+    }
+
+    private static Drawing.ShapeTypeValues ParseExcelShapePreset(string name)
+    {
+        var key = (name ?? string.Empty).Trim().ToLowerInvariant();
+        if (string.IsNullOrEmpty(key))
+            return Drawing.ShapeTypeValues.Rectangle;
+        if (_shapePresetMap.TryGetValue(key, out var val))
+            return val;
+        // Unknown preset: fall back to rectangle (legacy behavior — no throw,
+        // keeps Add lenient). Callers that care can compare with the returned
+        // value.
+        return Drawing.ShapeTypeValues.Rectangle;
+    }
 
     private static (int x, int y, int width, int height) ParseAnchorBounds(
         Dictionary<string, string> properties, string defX, string defY, string defW, string defH)
