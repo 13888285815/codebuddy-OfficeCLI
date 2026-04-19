@@ -3481,4 +3481,59 @@ public partial class ExcelHandler
             System.Globalization.CultureInfo.InvariantCulture,
             System.Globalization.DateTimeStyles.None,
             out result);
+
+    /// <summary>
+    /// Build a <x:font> child for a dxf (differentialFormat) from font.* sub-props.
+    /// Supports bold, italic, underline (single/double), strike, size, name, color.
+    /// Returns null if no font sub-props were supplied.
+    /// </summary>
+    internal static Font? BuildFormulaCfFont(Dictionary<string, string> properties)
+    {
+        bool any = false;
+        var font = new Font();
+        if (properties.TryGetValue("font.bold", out var fBold) && ParseHelpers.IsTruthy(fBold))
+        { font.Append(new Bold()); any = true; }
+        if (properties.TryGetValue("font.italic", out var fItalic) && ParseHelpers.IsTruthy(fItalic))
+        { font.Append(new Italic()); any = true; }
+        if (properties.TryGetValue("font.strike", out var fStrike) && ParseHelpers.IsTruthy(fStrike))
+        { font.Append(new Strike()); any = true; }
+        if (properties.TryGetValue("font.underline", out var fUnder))
+        {
+            var ul = new Underline();
+            var lv = fUnder.Trim().ToLowerInvariant();
+            ul.Val = lv switch
+            {
+                "double" or "dbl" => UnderlineValues.Double,
+                "singleaccounting" or "singleacct" => UnderlineValues.SingleAccounting,
+                "doubleaccounting" or "doubleacct" => UnderlineValues.DoubleAccounting,
+                "none" or "false" => UnderlineValues.None,
+                _ => UnderlineValues.Single
+            };
+            font.Append(ul);
+            any = true;
+        }
+        if (properties.TryGetValue("font.size", out var fSize))
+        {
+            // Accept "12", "12pt", "10.5pt" — strip trailing "pt" if present.
+            var cleaned = fSize.Trim().TrimEnd('p', 't', 'P', 'T', ' ');
+            if (double.TryParse(cleaned, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var sz))
+            {
+                font.Append(new FontSize { Val = sz });
+                any = true;
+            }
+        }
+        if (properties.TryGetValue("font.name", out var fName) && !string.IsNullOrWhiteSpace(fName))
+        {
+            font.Append(new FontName { Val = fName });
+            any = true;
+        }
+        if (properties.TryGetValue("font.color", out var fColor))
+        {
+            var norm = ParseHelpers.NormalizeArgbColor(fColor);
+            font.Append(new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = norm });
+            any = true;
+        }
+        return any ? font : null;
+    }
 }

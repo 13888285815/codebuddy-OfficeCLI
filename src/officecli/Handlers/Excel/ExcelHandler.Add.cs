@@ -1312,17 +1312,13 @@ public partial class ExcelHandler
                 var fcfFormula = properties.GetValueOrDefault("formula")
                     ?? throw new ArgumentException("Formula-based conditional formatting requires 'formula' property (e.g. formula=$A1>100)");
 
-                // Build DifferentialFormat (dxf) for the formatting
+                // Build DifferentialFormat (dxf) for the formatting.
+                // A dxf Font may carry: b, i, u, strike, sz, rFont, color.
+                // All sub-props are threaded together so users can combine
+                // (e.g. bold + italic + underline + custom size + name).
                 var dxf = new DifferentialFormat();
-                if (properties.TryGetValue("font.color", out var fontColor))
-                {
-                    var normalizedFontColor = ParseHelpers.NormalizeArgbColor(fontColor);
-                    dxf.Append(new Font(new DocumentFormat.OpenXml.Spreadsheet.Color { Rgb = normalizedFontColor }));
-                }
-                else if (properties.TryGetValue("font.bold", out var fontBold) && IsTruthy(fontBold))
-                {
-                    dxf.Append(new Font(new Bold()));
-                }
+                var dxfFont = BuildFormulaCfFont(properties);
+                if (dxfFont != null) dxf.Append(dxfFont);
 
                 if (properties.TryGetValue("fill", out var fillColor))
                 {
@@ -1330,13 +1326,6 @@ public partial class ExcelHandler
                     dxf.Append(new Fill(new PatternFill(
                         new BackgroundColor { Rgb = normalizedFillColor })
                     { PatternType = PatternValues.Solid }));
-                }
-
-                // Handle font.bold when font.color is also set
-                if (properties.TryGetValue("font.color", out _) && properties.TryGetValue("font.bold", out var fb2) && IsTruthy(fb2))
-                {
-                    var existingFont = dxf.GetFirstChild<Font>();
-                    existingFont?.Append(new Bold());
                 }
 
                 // Add dxf to stylesheet (ensure it exists)
