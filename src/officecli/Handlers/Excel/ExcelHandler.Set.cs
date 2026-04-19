@@ -1827,6 +1827,12 @@ public partial class ExcelHandler
                         var existingPane = sheetView.GetFirstChild<Pane>();
                         existingPane?.Remove();
 
+                        // R18-B3: freeze=A1 means "no freeze". Emitting a <pane> with
+                        // no xSplit/ySplit produces invalid OOXML (Excel repairs on
+                        // open). Treat A1 as a no-op after clearing the existing pane.
+                        if (colSplit <= 0 && rowSplit <= 0)
+                            break;
+
                         var activePane = (colSplit > 0 && rowSplit > 0) ? PaneValues.BottomRight
                             : (rowSplit > 0) ? PaneValues.BottomLeft
                             : PaneValues.TopRight;
