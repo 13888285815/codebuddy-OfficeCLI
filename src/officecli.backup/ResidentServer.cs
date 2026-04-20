@@ -778,27 +778,19 @@ public class ResidentServer : IDisposable
                 }
                 else
                 {
-                    // [安全修复] SECURITY FIXED: 使用完全随机的文件名，移除时间戳和原始文件名
-                    // 原始代码包含 {DateTime.Now:HHmmss} 和文件名，存在可预测性风险
-                    var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Guid.NewGuid():N}.html");
+                    // SECURITY: include a random token so the preview path is not predictable.
+                    // Without it, a predictable path enables a symlink pre-placement attack that
+                    // causes File.WriteAllText to clobber an arbitrary victim file. See
+                    // CommandBuilder.View.cs for the same fix.
+                    var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(_filePath)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
                     File.WriteAllText(htmlPath, html);
                     Console.WriteLine(htmlPath);
                     try
                     {
-                        // [安全修复] 仅允许打开 HTML 文件，设置正确的文件关联
-                        var psi = new System.Diagnostics.ProcessStartInfo
-                        {
-                            FileName = htmlPath,
-                            UseShellExecute = true
-                        };
+                        var psi = new System.Diagnostics.ProcessStartInfo(htmlPath) { UseShellExecute = true };
                         System.Diagnostics.Process.Start(psi);
                     }
                     catch { /* silently ignore if browser can't be opened */ }
-                    finally
-                    {
-                        // [安全修复] 延迟删除临时文件
-                        try { File.Delete(htmlPath); } catch { }
-                    }
                 }
             }
             else

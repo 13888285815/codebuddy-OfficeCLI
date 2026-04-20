@@ -191,29 +191,13 @@ public static class McpServer
             return v.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
         }
 
-        // [安全修复] SECURITY FIXED: 增强的路径验证，防止路径遍历和命令注入
+        // [安全修复] 输入验证：防止路径遍历攻击
         string SafeArg(string key)
         {
             var value = Arg(key);
-            if (!string.IsNullOrEmpty(value))
+            if (!string.IsNullOrEmpty(value) && (value.Contains("..") || value.Contains('~')))
             {
-                // 检查路径遍历攻击
-                if (value.Contains("..") || value.Contains('~'))
-                    throw new ArgumentException("Invalid path detected: potential path traversal");
-                
-                // 检查危险字符
-                var dangerousChars = new[] { '|', ';', '&', '$', '`', '\0', '\n', '\r' };
-                if (dangerousChars.Any(c => value.Contains(c)))
-                    throw new ArgumentException("Invalid characters in path");
-                
-                // 验证文件扩展名白名单（如果包含扩展名）
-                if (value.Contains('.'))
-                {
-                    var ext = Path.GetExtension(value)?.ToLowerInvariant();
-                    var allowedExtensions = new[] { ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp" };
-                    if (!string.IsNullOrEmpty(ext) && !allowedExtensions.Contains(ext))
-                        throw new ArgumentException($"File extension '{ext}' is not allowed");
-                }
+                throw new ArgumentException($"Invalid path detected: {value}");
             }
             return value;
         }
@@ -222,13 +206,13 @@ public static class McpServer
         {
             case "create":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 BlankDocCreator.Create(file);
                 return $"Created {file}";
             }
             case "view":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var mode = Arg("mode");
                 var start = ArgIntOpt("start");
                 var end = ArgIntOpt("end");
@@ -260,7 +244,7 @@ public static class McpServer
             }
             case "get":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var path = Arg("path"); if (string.IsNullOrEmpty(path)) path = "/";
                 var depth = ArgInt("depth", 1);
                 using var handler = DocumentHandlerFactory.Open(file);
@@ -269,7 +253,7 @@ public static class McpServer
             }
             case "query":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var selector = Arg("selector");
                 using var handler = DocumentHandlerFactory.Open(file);
                 var filters = AttributeFilter.Parse(selector);
@@ -278,7 +262,7 @@ public static class McpServer
             }
             case "set":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var path = Arg("path");
                 var props = ParseProps(ArgStringArray("props"));
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
@@ -293,7 +277,7 @@ public static class McpServer
             }
             case "add":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var parent = Arg("parent");
                 var type = Arg("type");
                 var index = ArgIntOpt("index");
@@ -310,7 +294,7 @@ public static class McpServer
             }
             case "remove":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var path = Arg("path");
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
                 handler.Remove(path);
@@ -318,7 +302,7 @@ public static class McpServer
             }
             case "move":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var path = Arg("path");
                 var to = Arg("to"); if (string.IsNullOrEmpty(to)) to = null;
                 var index = ArgIntOpt("index");
@@ -334,7 +318,7 @@ public static class McpServer
             }
             case "validate":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 using var handler = DocumentHandlerFactory.Open(file);
                 var errors = handler.Validate();
                 if (errors.Count == 0) return "Validation passed: no errors found.";
@@ -344,7 +328,7 @@ public static class McpServer
             }
             case "batch":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var commands = Arg("commands");
                 var forceStr = Arg("force");
                 var stopOnError = !string.Equals(forceStr, "true", StringComparison.OrdinalIgnoreCase);
@@ -373,7 +357,7 @@ public static class McpServer
             }
             case "swap":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var path = Arg("path");
                 var path2 = Arg("path2");
                 using var handler = DocumentHandlerFactory.Open(file, editable: true);
@@ -388,7 +372,7 @@ public static class McpServer
             }
             case "raw":
             {
-                var file = SafeArg("file");
+                var file = Arg("file");
                 var part = Arg("part"); if (string.IsNullOrEmpty(part)) part = "/document";
                 using var handler = DocumentHandlerFactory.Open(file);
                 return handler.Raw(part, null, null, null);

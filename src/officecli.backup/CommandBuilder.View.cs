@@ -84,19 +84,18 @@ static partial class CommandBuilder
                 {
                     if (browser)
                     {
-                        // [安全修复] SECURITY FIXED: 使用完全随机的文件名
-                        // 原始代码包含文件名和时间戳，存在可预测性风险，可能导致符号链接攻击
-                        var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Guid.NewGuid():N}.html");
+                        // --browser: write to temp file and open in browser
+                        // SECURITY: include a random token so the preview path is not predictable.
+                        // A predictable path (HHmmss only) lets a local attacker pre-place a symlink
+                        // at the expected location, causing File.WriteAllText to follow it and
+                        // overwrite an arbitrary victim file with preview HTML. It also caused
+                        // collisions between concurrent `view html` invocations of the same file.
+                        var htmlPath = Path.Combine(Path.GetTempPath(), $"officecli_preview_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}_{Guid.NewGuid():N}.html");
                         File.WriteAllText(htmlPath, html);
                         Console.WriteLine(htmlPath);
                         try
                         {
-                            // [安全修复] 使用安全的进程启动方式
-                            var psi = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = htmlPath,
-                                UseShellExecute = true
-                            };
+                            var psi = new System.Diagnostics.ProcessStartInfo(htmlPath) { UseShellExecute = true };
                             System.Diagnostics.Process.Start(psi);
                         }
                         catch { /* silently ignore if browser can't be opened */ }
@@ -131,15 +130,14 @@ static partial class CommandBuilder
                         string outPath;
                         if (svg.Contains("data-formula"))
                         {
-                            // [安全修复] SECURITY FIXED: 使用完全随机的文件名
-                            outPath = Path.Combine(Path.GetTempPath(), $"officecli_slide_{Guid.NewGuid():N}.html");
+                            // Wrap SVG in HTML shell for KaTeX formula rendering
+                            outPath = Path.Combine(Path.GetTempPath(), $"officecli_slide{slideNum}_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}.html");
                             var html = $"<!DOCTYPE html><html><head><meta charset='UTF-8'><link rel='stylesheet' href='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css'><script defer src='https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js'></script><style>body{{margin:0;display:flex;justify-content:center;background:#f0f0f0}}</style></head><body>{svg}<script>window.addEventListener('load',function(){{document.querySelectorAll('[data-formula]').forEach(function(el){{try{{katex.render(el.getAttribute('data-formula'),el,{{throwOnError:false,displayMode:true}})}}catch(e){{}}}})}})</script></body></html>";
                             File.WriteAllText(outPath, html);
                         }
                         else
                         {
-                            // [安全修复] SECURITY FIXED: 使用完全随机的文件名
-                            outPath = Path.Combine(Path.GetTempPath(), $"officecli_slide_{Guid.NewGuid():N}.svg");
+                            outPath = Path.Combine(Path.GetTempPath(), $"officecli_slide{slideNum}_{Path.GetFileNameWithoutExtension(file.Name)}_{DateTime.Now:HHmmss}.svg");
                             File.WriteAllText(outPath, svg);
                         }
                         Console.WriteLine(outPath);
