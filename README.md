@@ -1,13 +1,21 @@
-# OfficeCLI
+# OfficeCLI - 商用安全版本
 
-> **OfficeCLI is the world's first and the best command-line designed for AI agents.**
+> **OfficeCLI 商用安全版本 - 专为商用和二次开发优化**
 
-**Give any AI agent full control over Word, Excel, and PowerPoint -- in one line of code.**
+**为 AI 代理提供完整的 Word、Excel 和 PowerPoint 控制能力**
 
-Open-source. Single binary. No Office installation. No dependencies. Works everywhere.
+开源、单二进制文件、无需 Office 安装、无依赖、随处运行。
 
-[![GitHub Release](https://img.shields.io/github/v/release/iOfficeAI/OfficeCLI)](https://github.com/iOfficeAI/OfficeCLI/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Security](https://img.shields.io/badge/security-hardened-green.svg)](SECURITY.md)
+
+> **⚠️ 这是商用安全版本**，针对企业使用场景进行了安全加固。主要改进：
+> - ✅ 自动更新已禁用（防止供应链攻击）
+> - ✅ 增强的日志隐私保护
+> - ✅ 配置文件权限加固
+> - ✅ 本地处理优先
+>
+> 详细说明请参阅 [README_COMMERCIAL.md](README_COMMERCIAL.md)
 
 **English** | [中文](README_zh.md) | [日本語](README_ja.md) | [한국어](README_ko.md)
 

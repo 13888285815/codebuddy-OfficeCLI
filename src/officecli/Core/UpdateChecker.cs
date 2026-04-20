@@ -11,314 +11,99 @@ using System.Text.RegularExpressions;
 namespace OfficeCli.Core;
 
 /// <summary>
-/// Daily auto-update against GitHub releases.
-/// - Config stored in ~/.officecli/config.json
-/// - Checks at most once per day
-/// - Zero performance impact: spawns background process to check and upgrade
-/// - Silently skips if config dir is not writable
-///
-/// Also handles the __update-check__ internal command (called by the spawned background process).
+/// [商用版本] 自动更新功能已完全禁用
+/// 
+/// 为了安全考虑，商用版本移除了所有自动更新功能：
+/// - 不会自动检查更新
+/// - 不会下载任何外部代码
+/// - 不会执行自动升级
+/// 
+/// 如需更新，请手动下载新版本。
 /// </summary>
 internal static class UpdateChecker
 {
     internal static readonly string ConfigDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".officecli");
     private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
-    private const string GitHubRepo = "iOfficeAI/OfficeCLI";
-    private const string PrimaryBase = "https://officecli.ai";
-    private const string FallbackBase = "https://github.com/iOfficeAI/OfficeCLI";
-    private const int CheckIntervalHours = 24;
+    
+    // [商用版本] 已移除自动更新相关的URL和配置
+    // private const string GitHubRepo = "iOfficeAI/OfficeCLI";
+    // private const string PrimaryBase = "https://officecli.ai";
+    // private const string FallbackBase = "https://github.com/iOfficeAI/OfficeCLI";
+    // private const int CheckIntervalHours = 24;
 
     /// <summary>
-    /// Called on every officecli invocation. Spawns background upgrade if stale.
-    /// Never blocks, never throws.
+    /// [商用版本] 自动更新已禁用
+    /// 此方法现在为空操作，不会执行任何网络请求
     /// </summary>
     internal static void CheckInBackground()
     {
-        try
-        {
-            Directory.CreateDirectory(ConfigDir);
-        }
-        catch { return; }
-
-        // Apply pending update from previous background check (.update file)
-        ApplyPendingUpdate();
-
-        var config = LoadConfig();
-
-        // Respect autoUpdate setting
-        if (!config.AutoUpdate) return;
-
-        // If stale, spawn a background process to refresh (fire and forget)
-        if (!config.LastUpdateCheck.HasValue ||
-            (DateTime.UtcNow - config.LastUpdateCheck.Value).TotalHours >= CheckIntervalHours)
-        {
-            // Update timestamp immediately to prevent concurrent spawns
-            config.LastUpdateCheck = DateTime.UtcNow;
-            try { SaveConfig(config); } catch { }
-            SpawnRefreshProcess();
-        }
+        // [商用版本] 完全禁用自动更新
+        // 不执行任何操作，不创建目录，不发起网络请求
+        return;
     }
 
     /// <summary>
-    /// Internal command: checks for new version and auto-upgrades if available.
-    /// Called by the spawned background process.
+    /// [商用版本] 自动更新已禁用
+    /// 此方法现在为空操作
     /// </summary>
     internal static void RunRefresh()
     {
-        try
-        {
-            var config = LoadConfig();
-            var currentVersion = GetCurrentVersion();
-            if (currentVersion == null) return;
-
-            // Get latest version from redirect URL (no API, no rate limit)
-            // Try primary (officecli.ai) first, fallback to GitHub
-            using var handler = new HttpClientHandler { AllowAutoRedirect = false };
-            using var client = new HttpClient(handler);
-            client.DefaultRequestHeaders.Add("User-Agent", "OfficeCLI-UpdateChecker");
-            client.Timeout = TimeSpan.FromSeconds(10);
-
-            string? latestVersion = null;
-            string resolvedBase = FallbackBase;
-            foreach (var baseUrl in new[] { PrimaryBase, FallbackBase })
-            {
-                try
-                {
-                    var response = client.GetAsync($"{baseUrl}/releases/latest")
-                        .GetAwaiter().GetResult();
-                    var location = response.Headers.Location?.ToString();
-                    if (string.IsNullOrEmpty(location)) continue;
-
-                    var versionMatch = Regex.Match(location, @"/tag/v?(\d+\.\d+\.\d+)");
-                    if (versionMatch.Success)
-                    {
-                        latestVersion = versionMatch.Groups[1].Value;
-                        resolvedBase = baseUrl;
-                        break;
-                    }
-                }
-                catch { continue; }
-            }
-            if (latestVersion == null) return;
-
-            config.LastUpdateCheck = DateTime.UtcNow;
-            config.LatestVersion = latestVersion;
-            SaveConfig(config);
-
-            // Only download if newer
-            if (!IsNewer(latestVersion, currentVersion)) return;
-
-            var assetName = GetAssetName();
-            if (assetName == null) return;
-
-            var exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
-            if (exePath == null) return;
-
-            // Download binary (use the same base URL that returned the version)
-            using var downloadClient = new HttpClient();
-            downloadClient.DefaultRequestHeaders.Add("User-Agent", "OfficeCLI-UpdateChecker");
-            downloadClient.Timeout = TimeSpan.FromMinutes(5);
-
-            var downloadUrl = $"{resolvedBase}/releases/latest/download/{assetName}";
-            var finalPath = exePath + ".update";
-            // Stage download to .partial so a crashed/killed download never leaves
-            // a truncated PE at the canonical .update path that ApplyPendingUpdate would apply.
-            var partialPath = exePath + ".update.partial";
-            try { File.Delete(partialPath); } catch { }
-            using (var stream = downloadClient.GetStreamAsync(downloadUrl).GetAwaiter().GetResult())
-            using (var fileStream = File.Create(partialPath))
-            {
-                stream.CopyTo(fileStream);
-            }
-
-            // Verify downloaded binary can start
-            if (!OperatingSystem.IsWindows())
-                Process.Start("chmod", $"+x \"{partialPath}\"")?.WaitForExit(3000);
-
-            var verify = Process.Start(new ProcessStartInfo
-            {
-                FileName = partialPath,
-                Arguments = "--version",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                Environment = { ["OFFICECLI_SKIP_UPDATE"] = "1" }
-            });
-            if (verify == null)
-            {
-                try { File.Delete(partialPath); } catch { }
-                return;
-            }
-            var exited = verify.WaitForExit(5000);
-            if (!exited || verify.ExitCode != 0)
-            {
-                if (!exited) try { verify.Kill(); } catch { }
-                try { File.Delete(partialPath); } catch { }
-                return;
-            }
-
-            // Atomically promote .partial -> .update only after verification.
-            try { File.Delete(finalPath); } catch { }
-            try
-            {
-                File.Move(partialPath, finalPath, overwrite: true);
-            }
-            catch
-            {
-                try { File.Delete(partialPath); } catch { }
-                return;
-            }
-
-            if (OperatingSystem.IsWindows())
-            {
-                // Windows: can't replace running exe, leave .update for next startup
-            }
-            else
-            {
-                // Unix: replace in-place (safe even while running)
-                var oldPath = exePath + ".old";
-                try { File.Delete(oldPath); } catch { }
-                File.Move(exePath, oldPath, overwrite: true);
-                try
-                {
-                    File.Move(finalPath, exePath, overwrite: true);
-                }
-                catch
-                {
-                    // Rollback: restore original if new file failed to move
-                    try { File.Move(oldPath, exePath, overwrite: true); } catch { }
-                    return;
-                }
-                try { File.Delete(oldPath); } catch { }
-            }
-        }
-        catch
-        {
-            // Update timestamp even on failure to avoid retrying every command
-            try
-            {
-                var config = LoadConfig();
-                config.LastUpdateCheck = DateTime.UtcNow;
-                SaveConfig(config);
-            }
-            catch { }
-        }
+        // [商用版本] 完全禁用自动更新
+        Console.WriteLine("[商用版本] 自动更新功能已禁用。请手动下载更新。");
+        return;
     }
 
     /// <summary>
-    /// Apply a pending update (.update file) from a previous background check.
+    /// [商用版本] 不再应用待处理的更新
     /// </summary>
     private static void ApplyPendingUpdate()
     {
-        var exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
-        if (exePath == null) return;
-        TryApplyPendingUpdate(exePath);
-    }
-
-    /// <summary>
-    /// Test seam: applies a pending <c>{exePath}.update</c> by swapping it into place.
-    /// Note: only the canonical <c>.update</c> file is applied — a stale
-    /// <c>.update.partial</c> from an interrupted download is intentionally ignored.
-    /// </summary>
-    internal static bool TryApplyPendingUpdate(string exePath)
-    {
-        try
-        {
-            var updatePath = exePath + ".update";
-            if (!File.Exists(updatePath)) return false;
-
-            var oldPath = exePath + ".old";
-            try { File.Delete(oldPath); } catch { }
-            File.Move(exePath, oldPath, overwrite: true);
-            try
-            {
-                File.Move(updatePath, exePath, overwrite: true);
-            }
-            catch
-            {
-                // Rollback: restore original
-                try { File.Move(oldPath, exePath, overwrite: true); } catch { }
-                return false;
-            }
-            try { File.Delete(oldPath); } catch { }
-            return true;
-        }
-        catch { return false; }
-    }
-
-    private static string? GetAssetName()
-    {
-        if (OperatingSystem.IsMacOS())
-            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-                ? "officecli-mac-arm64" : "officecli-mac-x64";
-        if (OperatingSystem.IsLinux())
-            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-                ? "officecli-linux-arm64" : "officecli-linux-x64";
-        if (OperatingSystem.IsWindows())
-            return RuntimeInformation.ProcessArchitecture == Architecture.Arm64
-                ? "officecli-win-arm64.exe" : "officecli-win-x64.exe";
-        return null;
-    }
-
-    private static void SpawnRefreshProcess()
-    {
+        // [商用版本] 禁用自动更新应用
+        // 清理任何可能存在的旧更新文件
         try
         {
             var exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
-            if (exePath == null) return;
-
-            var startInfo = new ProcessStartInfo
+            if (exePath != null)
             {
-                FileName = exePath,
-                Arguments = "__update-check__",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                // Redirect child stdio away from the parent's console. Without
-                // these flags the child inherits the parent's stdout/stderr,
-                // which is a problem in two concrete scenarios:
-                //   (a) the parent is an MCP server — its stdout carries the
-                //       JSON-RPC protocol stream, and any byte the update-
-                //       check writes there would corrupt the protocol and
-                //       disconnect the MCP client;
-                //   (b) the parent is an interactive shell command that exits
-                //       before the child finishes — the child's "downloaded
-                //       v1.2.3" or error messages would then surface on the
-                //       user's terminal at a seemingly random later moment.
-                // We redirect to pipes and never Read them; the pipes are
-                // closed when the child exits. This cannot break the upgrade
-                // itself: RunRefresh() only writes to stdout/stderr for
-                // debugging/never (it's silent-on-success, silent-on-failure
-                // by design), and the download / verify / File.Move chain
-                // doesn't touch the console stream at all.
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                RedirectStandardInput = true
-            };
-
-            var process = Process.Start(startInfo);
-            if (process == null) return;
-            // Close our end of stdin immediately so the child sees EOF if it
-            // ever tries to read (defensive — RunRefresh doesn't read stdin).
-            try { process.StandardInput.Close(); } catch { }
-            // Don't wait, don't Read the redirected streams. When the child
-            // exits the OS closes its side of the pipes; the .NET runtime's
-            // SIGCHLD reaper waits on it so it never becomes a zombie even
-            // though we never call WaitForExit.
-            process.Dispose();
+                var updatePath = exePath + ".update";
+                var partialPath = exePath + ".update.partial";
+                var oldPath = exePath + ".old";
+                
+                // 清理旧更新文件（如果存在）
+                if (File.Exists(updatePath)) File.Delete(updatePath);
+                if (File.Exists(partialPath)) File.Delete(partialPath);
+                if (File.Exists(oldPath)) File.Delete(oldPath);
+            }
         }
-        catch { }
+        catch { /* 静默处理清理错误 */ }
     }
 
     /// <summary>
-    /// Handle 'officecli config key [value]' command.
+    /// [商用版本] 不再生成刷新进程
+    /// </summary>
+    private static void SpawnRefreshProcess()
+    {
+        // [商用版本] 禁用刷新进程生成
+        return;
+    }
+
+    /// <summary>
+    /// 处理配置命令
+    /// [商用版本] 移除了 autoUpdate 配置项
     /// </summary>
     internal static void HandleConfigCommand(string[] args)
     {
-        const string available = "autoUpdate, log, log clear";
+        const string available = "log, log clear";
         var key = args[0].ToLowerInvariant();
         var config = LoadConfig();
+
+        // [商用版本] 处理 autoUpdate 配置请求
+        if (key == "autoupdate")
+        {
+            Console.WriteLine("[商用版本] 自动更新功能已禁用，此配置项无效。");
+            return;
+        }
 
         // officecli config log clear
         if (key == "log" && args.Length == 2 && args[1].ToLowerInvariant() == "clear")
@@ -333,7 +118,6 @@ internal static class UpdateChecker
             // Read
             var value = key switch
             {
-                "autoupdate" => config.AutoUpdate.ToString().ToLowerInvariant(),
                 "log" => config.Log.ToString().ToLowerInvariant(),
                 _ => null
             };
@@ -348,9 +132,6 @@ internal static class UpdateChecker
         var newValue = args[1];
         switch (key)
         {
-            case "autoupdate":
-                config.AutoUpdate = ParseHelpers.IsTruthy(newValue);
-                break;
             case "log":
                 config.Log = ParseHelpers.IsTruthy(newValue);
                 break;
@@ -408,6 +189,17 @@ internal static class UpdateChecker
         Directory.CreateDirectory(ConfigDir);
         var json = JsonSerializer.Serialize(config, AppConfigContext.Default.AppConfig);
         File.WriteAllText(ConfigPath, json);
+        
+        // [商用版本] 设置配置文件权限，仅限当前用户访问
+        try
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(ConfigPath, 
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+        }
+        catch { /* 权限设置失败不影响功能 */ }
     }
 
     internal static string? GetCurrentVersionPublic() => GetCurrentVersion();
@@ -417,9 +209,12 @@ internal static class UpdateChecker
 
 internal class AppConfig
 {
-    public DateTime? LastUpdateCheck { get; set; }
-    public string? LatestVersion { get; set; }
-    public bool AutoUpdate { get; set; } = true;
+    // [商用版本] 移除了 LastUpdateCheck 和 LatestVersion
+    // public DateTime? LastUpdateCheck { get; set; }
+    // public string? LatestVersion { get; set; }
+    
+    // [商用版本] 自动更新始终禁用
+    public bool AutoUpdate { get; set; } = false;
     public bool Log { get; set; }
     public string? InstalledBinaryVersion { get; set; }
 }

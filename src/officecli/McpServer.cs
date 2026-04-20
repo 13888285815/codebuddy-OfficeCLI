@@ -21,24 +21,10 @@ public static class McpServer
         using var reader = new StreamReader(Console.OpenStandardInput());
         using var writer = new StreamWriter(Console.OpenStandardOutput()) { AutoFlush = true };
 
-        // MCP server is a long-lived stdio process. The normal
-        // per-invocation auto-upgrade path (Program.cs:112) is
-        // short-circuited for `officecli mcp` because CheckInBackground
-        // is called AFTER the mcp branch in Program.cs — so without
-        // this hook, an MCP instance started once and left running for
-        // days/weeks would never see a new release.
-        //
-        // Run the upgrade path in the background: fire once at startup
-        // (applies any pending .update from a previous run and kicks a
-        // fresh check if >24h stale), then every hour. The hourly wake
-        // is cheap because CheckInBackground is debounced by the same
-        // 24h timestamp in ~/.officecli/config.json as the normal CLI
-        // path, so 23 of 24 wakes no-op. The actual download / verify /
-        // File.Move happens in a spawned subprocess whose stdio is
-        // redirected (see UpdateChecker.SpawnRefreshProcess), so
-        // nothing it does can corrupt our stdout JSON-RPC stream.
-        using var upgradeCts = new CancellationTokenSource();
-        var upgradeTask = RunPeriodicUpgradeCheckAsync(upgradeCts.Token);
+        // [商用版本] 已禁用自动更新功能
+        // 原代码在此处启动后台更新检查，现已移除以确保安全
+        // using var upgradeCts = new CancellationTokenSource();
+        // var upgradeTask = RunPeriodicUpgradeCheckAsync(upgradeCts.Token);
 
         try
         {
@@ -80,17 +66,21 @@ public static class McpServer
         }
         finally
         {
-            upgradeCts.Cancel();
-            try { await upgradeTask; } catch { }
+            // [商用版本] 自动更新已禁用
+            // upgradeCts.Cancel();
+            // try { await upgradeTask; } catch { }
         }
     }
 
+    // [商用版本] 自动更新检查已禁用
     private static async Task RunPeriodicUpgradeCheckAsync(CancellationToken token)
     {
-        // Fire once at startup — no matter what state the config is in,
-        // this applies any pending .update from a previous run and
-        // (if stale) spawns a fresh download. Does not block the main
-        // loop: this method runs on a background task.
+        // [商用版本] 此功能已禁用，不执行任何更新检查
+        // 原代码在此处执行定期更新检查，现已移除
+        await Task.CompletedTask;
+        return;
+        
+        /* 原代码已注释掉：
         try { UpdateChecker.CheckInBackground(); } catch { }
 
         while (!token.IsCancellationRequested)

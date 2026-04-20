@@ -123,7 +123,17 @@ internal class WatchServer : IDisposable
         _pipeName = GetWatchPipeName(_filePath);
         _port = port;
         _idleTimeout = idleTimeout ?? ResolveIdleTimeout();
+        
+        // [商用版本] 安全加固：仅绑定到本地回环地址
+        // 确保不接受任何外部网络连接
         _tcpListener = new TcpListener(IPAddress.Loopback, _port);
+        
+        // [商用版本] 设置更严格的空闲超时，减少暴露窗口
+        if (_idleTimeout > TimeSpan.FromMinutes(10))
+        {
+            _idleTimeout = TimeSpan.FromMinutes(10);
+        }
+        
         if (!string.IsNullOrEmpty(initialHtml))
             _currentHtml = initialHtml;
     }
