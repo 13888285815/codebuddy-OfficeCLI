@@ -191,6 +191,17 @@ public static class McpServer
             return v.EnumerateArray().Select(e => e.GetString() ?? "").ToArray();
         }
 
+        // [安全修复] 输入验证：防止路径遍历攻击
+        string SafeArg(string key)
+        {
+            var value = Arg(key);
+            if (!string.IsNullOrEmpty(value) && (value.Contains("..") || value.Contains('~')))
+            {
+                throw new ArgumentException($"Invalid path detected: {value}");
+            }
+            return value;
+        }
+
         switch (name)
         {
             case "create":

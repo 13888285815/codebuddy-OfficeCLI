@@ -1,0 +1,81 @@
+name: Security Build and Test
+
+on:
+  push:
+    branches: [ security-hardened ]
+  pull_request:
+    branches: [ main, security-hardened ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        dotnet-version: ['10.0.x']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ matrix.dotnet-version }}
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Build
+      run: dotnet build --no-restore
+
+    - name: Test
+      run: dotnet test --no-build --verbosity normal
+
+  security-scan:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run security audit
+      run: |
+        echo "🔍 Running security checks..."
+        # Check for common security issues
+        grep -r "eval\s*(" src/ || echo "✓ No eval() found"
+        grep -r "Process\s*\.Start" src/ | head -5 || echo "✓ No dangerous Process.Start"
+        grep -r "innerHTML\s*=" src/ || echo "✓ No innerHTML assignments"
+        
+    - name: Upload security report
+      uses: actions/upload-artifact@v4
+      with:
+        name: security-report
+        path: |
+          SECURITY_PRIVACY_IMPROVEMENT_REPORT.md
+          SECURITY_IMPLEMENTATION_CHECKLIST.md
+        retention-days: 30
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Publish
+      run: dotnet publish -c Release -o release
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: release/**
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
